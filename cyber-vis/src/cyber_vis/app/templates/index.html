@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyber-Vis Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1400px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .stats-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px; 
+            margin-bottom: 30px;
+        }
+        .stat-card { 
+            background: rgba(255, 255, 255, 0.1); 
+            padding: 20px; 
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .stat-value { 
+            font-size: 2em; 
+            font-weight: bold; 
+            margin: 10px 0;
+            color: #4cc9f0;
+        }
+        .chart-container { 
+            background: rgba(255, 255, 255, 0.1); 
+            padding: 20px; 
+            border-radius: 10px;
+            margin-bottom: 20px;
+            height: 400px;
+        }
+        .event-log {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 20px;
+            border-radius: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .event { 
+            padding: 10px; 
+            margin-bottom: 5px; 
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+        .event.success { border-left: 4px solid #4ade80; }
+        .event.error { border-left: 4px solid #f87171; }
+        .event.warning { border-left: 4px solid #fbbf24; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Cyber-Vis Мониторинг в реальном времени</h1>
+            <p>Все подключения и попытки входа отображаются здесь</p>
+            <div class="status">
+                <span id="wsStatus">🔴 Не подключено</span>
+            </div>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <!-- Статистика будет заполнена JavaScript -->
+        </div>
+
+        <div class="chart-container">
+            <canvas id="loginChart"></canvas>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="activityChart"></canvas>
+        </div>
+
+        <h2>📋 Последние события</h2>
+        <div class="event-log" id="eventLog">
+            <!-- События будут добавляться здесь -->
+        </div>
+    </div>
+
+    <script>
+        // WebSocket подключение
+        let ws = null;
+        let loginChart = null;
+        let activityChart = null;
+        
+        // Подключение к WebSocket
+        function connectWebSocket() {
+            ws = new WebSocket('ws://localhost:8000/ws/monitor');
+            
+            ws.onopen = () => {
+                document.getElementById('wsStatus').innerHTML = '🟢 Подключено';
+                console.log('✅ Подключено к WebSocket');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket ошибка:', error);
+                document.getElementById('wsStatus').innerHTML = '🔴 Ошибка подключения';
+            };
+            
+            ws.onclose = () => {
+                document.getElementById('wsStatus').innerHTML = '🔴 Отключено';
+                console.log('WebSocket закрыт, переподключение через 5 секунд...');
+                setTimeout(connectWebSocket, 5000);
+            };
+        }
+        
+        // Обработка сообщений WebSocket
+        function handleWebSocketMessage(data) {
+            switch(data.type) {
+                case 'init':
+                    updateStats(data.data.stats);
+                    updateCharts(data.data);
+                    addEvent('✅ Инициализация данных', 'success');
+                    break;
+                    
+                case 'login_success':
+                    addEvent(`✅ Пользователь ${data.data.username} вошел в систему`, 'success');
+                    updateStatsAfterEvent('successful_logins');
+                    break;
+                    
+                case 'login_failed':
+                    addEvent(`❌ Неудачная попытка входа: ${data.data.username}`, 'error');
+                    updateStatsAfterEvent('failed_logins');
+                    break;
+                    
+                case 'stats_update':
+                    updateStats(data.data);
+                    break;
+                    
+                case 'metric_update':
+                    updateMetricChart(data.data);
+                    break;
+                    
+                case 'client_disconnected':
+                    addEvent(`👋 Клиент отключился`, 'warning');
+                    break;
+            }
+        }
+        
+        // Обновление статистики
+        function updateStats(stats) {
+            const statsGrid = document.getElementById('statsGrid');
+            
+            const statsData = [
+                { label: 'Активные сессии', value: stats.active_sessions || 0, icon: '👥' },
+                { label: 'Успешных входов', value: stats.login_attempts?.successful || 0, icon: '✅' },
+                { label: 'Неудачных попыток', value: stats.login_attempts?.failed || 0, icon: '❌' },
+                { label: 'Всего попыток', value: stats.login_attempts?.total || 0, icon: '📊' },
+                { label: 'Уникальных пользователей', value: stats.unique_users || 0, icon: '👤' },
+                { label: 'За 24 часа', value: stats.last_24h?.total || 0, icon: '🕐' }
+            ];
+            
+            statsGrid.innerHTML = statsData.map(stat => `
+                <div class="stat-card">
+                    <div class="stat-icon">${stat.icon}</div>
+                    <div class="stat-label">${stat.label}</div>
+                    <div class="stat-value">${stat.value}</div>
+                </div>
+            `).join('');
+        }
+        
+        function updateStatsAfterEvent(type) {
+            // Здесь можно добавить логику для инкремента статистики
+            console.log(`Статистика обновлена: ${type}`);
+        }
+        
+        // Добавление события в лог
+        function addEvent(message, type = 'info') {
+            const eventLog = document.getElementById('eventLog');
+            const eventDiv = document.createElement('div');
+            eventDiv.className = `event ${type}`;
+            eventDiv.innerHTML = `
+                <span style="color: #aaa">[${new Date().toLocaleTimeString()}]</span>
+                ${message}
+            `;
+            eventLog.prepend(eventDiv);
+            
+            // Ограничиваем количество событий
+            while (eventLog.children.length > 50) {
+                eventLog.removeChild(eventLog.lastChild);
+            }
+        }
+        
+        // Инициализация графиков
+        function initCharts() {
+            const loginCtx = document.getElementById('loginChart').getContext('2d');
+            loginChart = new Chart(loginCtx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Попытки входа в час',
+                        data: [],
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Активность входа по времени'
+                        }
+                    }
+                }
+            });
+            
+            const activityCtx = document.getElementById('activityChart').getContext('2d');
+            activityChart = new Chart(activityCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Успешные', 'Неудачные'],
+                    datasets: [{
+                        data: [0, 0],
+                        backgroundColor: [
+                            'rgba(75, 192, 192, 0.8)',
+                            'rgba(255, 99, 132, 0.8)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Соотношение попыток входа'
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateCharts(data) {
+            if (loginChart && activityChart) {
+                // Обновляем графики на основе полученных данных
+                const success = data.stats?.login_attempts?.successful || 0;
+                const failed = data.stats?.login_attempts?.failed || 0;
+                
+                activityChart.data.datasets[0].data = [success, failed];
+                activityChart.update();
+            }
+        }
+        
+        function updateMetricChart(metricData) {
+            // Здесь можно добавить обновление графиков метрик
+            console.log('Метрика получена:', metricData);
+        }
+        
+        // Инициализация при загрузке страницы
+        window.addEventListener('load', () => {
+            initCharts();
+            connectWebSocket();
+            
+            // Периодическое обновление (fallback)
+            setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 30000);
+        });
+    </script>
+</body>
+</html>
