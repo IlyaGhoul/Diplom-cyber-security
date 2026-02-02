@@ -1,70 +1,121 @@
-"""
-Супер-минимальное приложение для авторизации
-"""
 import sys
 import requests
+import threading
 from PyQt6 import QtWidgets, QtCore
-from src.cyber_vis.app.scripts.loginui import Ui_MainWindow
 
-class LoginWindow(QtWidgets.QMainWindow):
+class SimpleAuthSender(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
         
-        # Базовая настройка
-        self.setFixedSize(self.size())
-        self.setWindowTitle("Вход")
-        self.ui.lineEdit_2.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
-        self.ui.lineEdit.setText("ilya")
-        self.ui.lineEdit_2.setText("1111")
-        self.ui.pushButton.setText("Войти")
-        self.ui.pushButton_2.setText("Закрыть")
+        widget = QtWidgets.QWidget()
+        self.setCentralWidget(widget)
+        layout = QtWidgets.QVBoxLayout(widget)
         
-        # Подключение
-        self.ui.pushButton.clicked.connect(self.login)
-        self.ui.pushButton_2.clicked.connect(self.close)
+        # Поля ввода
+        self.login = QtWidgets.QLineEdit("ilya")
+        self.password = QtWidgets.QLineEdit("1111")
+        self.password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        
+        # Кнопка
+        self.btn = QtWidgets.QPushButton("Отправить")
+        self.btn.clicked.connect(self.send_data_in_thread)
+        
+        # Статус
+        self.status = QtWidgets.QLabel("Готов к отправке")
+        
+        # Сборка
+        layout.addWidget(QtWidgets.QLabel("Логин:"))
+        layout.addWidget(self.login)
+        layout.addWidget(QtWidgets.QLabel("Пароль:"))
+        layout.addWidget(self.password)
+        layout.addWidget(self.btn)
+        layout.addWidget(self.status)
+        
+        self.setWindowTitle("Auth Sender")
+        self.setFixedSize(250, 200)
     
-    def login(self):
-        username = self.ui.lineEdit.text().strip()
-        password = self.ui.lineEdit_2.text().strip()
+    def send_data_in_thread(self):
+        """Запуск отправки в отдельном потоке"""
+        self.btn.setEnabled(False)
+        self.btn.setText("...")
+        self.status.setText("Отправка...")
         
-        if not username or not password:
-            return
-        
-        self.ui.pushButton.setEnabled(False)
-        self.ui.pushButton.setText("...")
-        
+        # Запускаем в отдельном потоке
+        thread = threading.Thread(target=self.send_data_thread)
+        thread.daemon = True
+        thread.start()
+    
+    def send_data_thread(self):
+        """Отправка данных в отдельном потоке"""
         try:
             response = requests.post(
                 "http://localhost:8000/api/auth/login",
-                json={"username": username, "password": password, "client_type": "desktop"},
+                json={
+                    "username": self.login.text(),
+                    "password": self.password.text(),
+                    "client_type": "desktop"
+                },
                 timeout=3
             )
             
-            if response.json().get("success"):
-                self.ui.pushButton.setText("✓")
-                self.ui.pushButton.setStyleSheet("background-color: green; color: white;")
-                QtWidgets.QApplication.processEvents()
-                QtCore.QTimer.singleShot(500, self.close)
-            else:
-                self.ui.pushButton.setText("✗")
-                self.ui.pushButton.setStyleSheet("background-color: red; color: white;")
-                QtCore.QTimer.singleShot(1000, self.reset_button)
-                
+            success = response.json().get("success", False)
+            
+            # Обновляем UI из главного потока
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "update_ui_after_send",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(bool, success)
+            )
+            
         except Exception as e:
-            print(f"Ошибка подключения: {e}")
-            self.ui.pushButton.setText("✗")
-            self.ui.pushButton.setStyleSheet("background-color: orange; color: white;")
-            QtCore.QTimer.singleShot(1000, self.reset_button)
+            # Ошибка соединения
+            QtCore.QMetaObject.invokeMethod(
+                self,
+                "update_ui_error",
+                QtCore.Qt.ConnectionType.QueuedConnection,
+                QtCore.Q_ARG(str, str(e))
+            )
     
-    def reset_button(self):
-        self.ui.pushButton.setEnabled(True)
-        self.ui.pushButton.setText("Войти")
-        self.ui.pushButton.setStyleSheet("")
+    @QtCore.pyqtSlot(bool)
+    def update_ui_after_send(self, success):
+        """Обновить UI после успешной отправки"""
+        if success:
+            self.status.setText("✅ Отправлено")
+            self.btn.setText("✅")
+        else:
+            self.status.setText("❌ Ошибка авторизации")
+            self.btn.setText("❌")
+        
+        # Восстанавливаем через 2 секунды
+        QtCore.QTimer.singleShot(2000, self.reset_ui)
+    
+    @QtCore.pyqtSlot(str)
+    def update_ui_error(self, error_msg):
+        """Обновить UI при ошибке"""
+        self.status.setText(f"❌ Ошибка: {error_msg[:30]}")
+        self.btn.setText("❌")
+        QtCore.QTimer.singleShot(2000, self.reset_ui)
+    
+    def reset_ui(self):
+        """Вернуть UI в исходное состояние"""
+        self.btn.setEnabled(True)
+        self.btn.setText("Отправить")
+        self.status.setText("Готов к отправке")
 
 if __name__ == "__main__":
+    # Добавляем обработку Ctrl+C для Poetry
+    import signal
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    
     app = QtWidgets.QApplication(sys.argv)
-    window = LoginWindow()
+    window = SimpleAuthSender()
     window.show()
-    sys.exit(app.exec())
+    
+    # Запускаем с обработкой исключений
+    try:
+        sys.exit(app.exec())
+    except KeyboardInterrupt:
+        print("\nПриложение закрыто")
+    except Exception as e:
+        print(f"Ошибка: {e}")

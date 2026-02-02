@@ -81,6 +81,8 @@
             padding: 20px;
             margin-bottom: 20px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            height: 400px;
+            position: relative;
         }
         
         .attempts-list {
@@ -194,6 +196,12 @@
             animation: pulse 2s infinite;
         }
         
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
         /* Скроллбар */
         ::-webkit-scrollbar {
             width: 8px;
@@ -213,19 +221,14 @@
             background: #3651d4;
         }
         
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: #666;
-        }
-        .chart-container {
-            background: rgba(255, 255, 255, 0.05);
+        .error-state {
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid rgba(255, 0, 0, 0.3);
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            height: 400px; /* Фиксированная высота для графика */
-            position: relative;
+            color: #ff6b6b;
+            text-align: center;
         }
     </style>
 </head>
@@ -240,8 +243,29 @@
             🔴 Не подключено
         </div>
         
+        <div id="errorContainer"></div>
+        
         <div class="stats-grid" id="statsGrid">
-            <!-- Статистика будет загружена через JS -->
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-value" id="totalAttempts">0</div>
+                <div class="stat-label">Всего попыток</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-value" id="successfulAttempts">0</div>
+                <div class="stat-label">Успешных</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">❌</div>
+                <div class="stat-value" id="failedAttempts">0</div>
+                <div class="stat-label">Неудачных</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">👤</div>
+                <div class="stat-value" id="uniqueUsers">0</div>
+                <div class="stat-label">Уникальных пользователей</div>
+            </div>
         </div>
         
         <div class="chart-container">
@@ -250,61 +274,131 @@
         
         <h2 style="margin: 20px 0 10px 0;">📋 Последние попытки входа</h2>
         <div class="attempts-list" id="attemptsList">
-            <div class="empty-state">Ожидание данных...</div>
+            <div class="empty-state">Загрузка данных...</div>
         </div>
     </div>
 
 <script>
-    console.log('📊 Загружается страница мониторинга');
-
-// Функция для проверки данных графика
-function debugChartData(attempts) {
-    console.log('📈 Данные для графика:', {
-        'Количество попыток': attempts?.length || 0,
-        'Первая попытка': attempts?.[0],
-        'Последняя попытка': attempts?.[attempts?.length - 1],
-        'Успешные': attempts?.filter(a => a.success)?.length || 0,
-        'Неудачные': attempts?.filter(a => !a.success)?.length || 0
-    });
-}
     // Глобальные переменные
     let ws = null;
     let attemptsChart = null;
-    let chartData = {
-        labels: [],
-        successData: [],
-        failedData: []
-    };
+    let pingInterval = null;
+    let reconnectTimeout = null;
+    let isInitialDataLoaded = false;
+    
+    // Показать ошибку
+    function showError(message) {
+        const errorContainer = document.getElementById('errorContainer');
+        errorContainer.innerHTML = `
+            <div class="error-state">
+                <strong>⚠️ Ошибка:</strong> ${message}
+                <button onclick="retryConnection()" style="
+                    background: #4361ee;
+                    color: white;
+                    border: none;
+                    padding: 8px 16px;
+                    border-radius: 5px;
+                    margin-left: 10px;
+                    cursor: pointer;
+                ">Повторить</button>
+            </div>
+        `;
+    }
+    
+    // Скрыть ошибку
+    function hideError() {
+        const errorContainer = document.getElementById('errorContainer');
+        errorContainer.innerHTML = '';
+    }
+    
+    // Повторить подключение
+    function retryConnection() {
+        hideError();
+        connectWebSocket();
+        loadInitialData();
+    }
     
     // Подключение к WebSocket
     function connectWebSocket() {
+        console.log('🔗 Подключаюсь к WebSocket...');
+        
+        if (ws) {
+            if (ws.readyState === WebSocket.OPEN) {
+                console.log('✅ Уже подключено');
+                return;
+            }
+            ws.close();
+        }
+        
         ws = new WebSocket('ws://localhost:8000/ws/monitor');
         
         ws.onopen = () => {
-            console.log('✅ Подключено к WebSocket');
+            console.log('✅ WebSocket подключен');
             updateConnectionStatus(true);
+            hideError();
+            
+            // Очищаем таймаут переподключения
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+            
+            // Запускаем пинг каждые 25 секунд
+            startPing();
         };
         
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                console.log('📨 Получено:', data.type);
+                console.log('📨 WebSocket сообщение:', data.type);
                 handleWebSocketMessage(data);
             } catch (e) {
-                console.error('Ошибка парсинга JSON:', e);
+                console.error('❌ Ошибка парсинга JSON:', e);
             }
         };
         
         ws.onerror = (error) => {
-            console.error('WebSocket ошибка:', error);
+            console.error('❌ WebSocket ошибка:', error);
             updateConnectionStatus(false);
+            
+            if (!isInitialDataLoaded) {
+                showError('Не удалось подключиться к серверу. Проверьте, запущен ли сервер на localhost:8000');
+            }
         };
         
-        ws.onclose = () => {
-            console.log('WebSocket закрыт, переподключение через 3 секунды...');
+        ws.onclose = (event) => {
+            console.log('📴 WebSocket закрыт:', event.code, event.reason);
             updateConnectionStatus(false);
-            setTimeout(connectWebSocket, 3000);
+            
+            // Очищаем интервал пинга
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+            
+            // Пытаемся переподключиться через 3 секунды
+            reconnectTimeout = setTimeout(() => {
+                console.log('🔄 Пытаюсь переподключиться...');
+                connectWebSocket();
+            }, 3000);
         };
+    }
+    
+    // Функция пинга для поддержания соединения
+    function startPing() {
+        if (pingInterval) {
+            clearInterval(pingInterval);
+        }
+        
+        pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send('ping');
+                } catch (e) {
+                    console.log('❌ Ошибка отправки ping:', e);
+                }
+            }
+        }, 25000); // Каждые 25 секунд
     }
     
     // Обновление статуса подключения
@@ -321,70 +415,64 @@ function debugChartData(attempts) {
     
     // Обработка сообщений WebSocket
     function handleWebSocketMessage(data) {
-        console.log('📨 Получено сообщение:', data.type, data.data);
-        
         switch(data.type) {
             case 'init':
+                console.log('📦 Получены начальные данные');
                 updateStats(data.data.stats);
                 updateAttemptsList(data.data.recent_attempts);
-                initChart(data.data.recent_attempts);
+                isInitialDataLoaded = true;
                 break;
                 
             case 'login_attempt':
                 console.log('📨 Новая попытка входа:', data.data);
                 addAttemptToList(data.data);
-                updateChartWithAttempt(data.data);
-                updateStatsAfterAttempt(data.data.success);
+                updateStatsFromAttempt(data.data);
+                // Перезагружаем данные графика
+                loadChartData();
                 break;
                 
             case 'stats_update':
                 updateStats(data.data);
+                break;
+                
+            case 'pong':
+            case 'keep_alive':
+                // Просто подтверждение, ничего не делаем
                 break;
         }
     }
     
     // Обновление статистики
     function updateStats(stats) {
-        const statsGrid = document.getElementById('statsGrid');
+        console.log('📊 Обновление статистики:', stats);
         
-        const statsData = [
-            { label: 'Всего попыток', value: stats.total_attempts || 0, icon: '📊' },
-            { label: 'Успешных', value: stats.successful || 0, icon: '✅' },
-            { label: 'Неудачных', value: stats.failed || 0, icon: '❌' },
-            { label: 'Уникальных пользователей', value: stats.unique_users || 0, icon: '👤' },
-            { label: 'Уникальных IP', value: stats.unique_ips || 0, icon: '🌐' },
-            { label: 'За последний час', value: stats.last_hour || 0, icon: '🕐' }
-        ];
-        
-        statsGrid.innerHTML = statsData.map(stat => `
-            <div class="stat-card">
-                <div class="stat-icon">${stat.icon}</div>
-                <div class="stat-value">${stat.value}</div>
-                <div class="stat-label">${stat.label}</div>
-            </div>
-        `).join('');
+        document.getElementById('totalAttempts').textContent = stats.total_attempts || 0;
+        document.getElementById('successfulAttempts').textContent = stats.successful || 0;
+        document.getElementById('failedAttempts').textContent = stats.failed || 0;
+        document.getElementById('uniqueUsers').textContent = stats.unique_users || 0;
     }
     
-    function updateStatsAfterAttempt(isSuccess) {
+    function updateStatsFromAttempt(attempt) {
         // Обновляем статистику в реальном времени
-        const stats = document.querySelectorAll('.stat-value');
-        if (stats.length >= 3) {
-            // Общее количество
-            let total = parseInt(stats[0].textContent);
-            stats[0].textContent = total + 1;
-            
-            // Успешные или неудачные
-            if (isSuccess) {
-                let success = parseInt(stats[1].textContent);
-                stats[1].textContent = success + 1;
-            } else {
-                let failed = parseInt(stats[2].textContent);
-                stats[2].textContent = failed + 1;
+        const totalEl = document.getElementById('totalAttempts');
+        const successEl = document.getElementById('successfulAttempts');
+        const failedEl = document.getElementById('failedAttempts');
+        
+        if (totalEl) {
+            let total = parseInt(totalEl.textContent) || 0;
+            totalEl.textContent = total + 1;
+        }
+        
+        if (attempt && attempt.success) {
+            if (successEl) {
+                let success = parseInt(successEl.textContent) || 0;
+                successEl.textContent = success + 1;
             }
-            
-            // За последний час
-            let lastHour = parseInt(stats[5].textContent);
-            stats[5].textContent = lastHour + 1;
+        } else if (attempt) {
+            if (failedEl) {
+                let failed = parseInt(failedEl.textContent) || 0;
+                failedEl.textContent = failed + 1;
+            }
         }
     }
     
@@ -392,13 +480,19 @@ function debugChartData(attempts) {
     function updateAttemptsList(attempts) {
         const attemptsList = document.getElementById('attemptsList');
         
-        if (attempts.length === 0) {
+        if (!attempts || attempts.length === 0) {
             attemptsList.innerHTML = '<div class="empty-state">Нет данных о попытках входа</div>';
             return;
         }
         
+        console.log('📋 Обновляю список попыток:', attempts.length, 'записей');
+        
         // Сортируем по времени (новые сверху)
-        attempts.sort((a, b) => new Date(b.attempt_time) - new Date(a.attempt_time));
+        attempts.sort((a, b) => {
+            const timeA = new Date(a.attempt_time || a.timestamp || 0);
+            const timeB = new Date(b.attempt_time || b.timestamp || 0);
+            return timeB - timeA;
+        });
         
         attemptsList.innerHTML = '';
         attempts.forEach(attempt => {
@@ -422,12 +516,12 @@ function debugChartData(attempts) {
             attemptEl.style.animation = 'slideIn 0.3s ease';
         }
         
-        const time = new Date(attempt.timestamp || attempt.attempt_time);
-        const timeStr = time.toLocaleTimeString();
+        const time = new Date(attempt.timestamp || attempt.attempt_time || Date.now());
+        const timeStr = time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
         
         attemptEl.innerHTML = `
             <div class="attempt-header">
-                <div class="attempt-username">${attempt.username}</div>
+                <div class="attempt-username">${attempt.username || 'Неизвестно'}</div>
                 <div class="attempt-time">${timeStr}</div>
             </div>
             <div class="attempt-info">
@@ -453,290 +547,276 @@ function debugChartData(attempts) {
         }
     }
     
-function initChart(attempts) {
-    console.log('🎯 Начинаю инициализацию графика');
-    
-    const canvas = document.getElementById('attemptsChart');
-    if (!canvas) {
-        console.error('❌ Canvas не найден!');
-        return;
+    // Загрузка данных для графика
+    function loadChartData() {
+        console.log('📈 Загружаю данные для графика...');
+        
+        fetch('http://localhost:8000/api/attempts_for_chart?hours=6')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success && data.data) {
+                    console.log('✅ Данные графика получены:', data.data);
+                    initChart(data.data);
+                } else {
+                    console.error('❌ Ошибка при получении данных графика:', data);
+                    loadAttemptsForChartFallback();
+                }
+            })
+            .catch(error => {
+                console.error('❌ Ошибка загрузки данных графика:', error);
+                loadAttemptsForChartFallback();
+            });
     }
     
-    console.log('✅ Canvas найден, размеры:', canvas.width, 'x', canvas.height);
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-        console.error('❌ Не могу получить контекст 2D');
-        return;
+    function loadAttemptsForChartFallback() {
+        fetch('http://localhost:8000/api/attempts?limit=200')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.data) {
+                    console.log('📊 Использую fallback данные для графика');
+                    prepareChartDataFromAttempts(data.data);
+                } else {
+                    createTestChartData();
+                }
+            })
+            .catch(error => {
+                console.error('❌ Ошибка fallback загрузки:', error);
+                createTestChartData();
+            });
     }
     
-    console.log('✅ Контекст получен');
-    
-    // Уничтожаем предыдущий график если есть
-    if (attemptsChart) {
-        console.log('🗑️ Уничтожаю предыдущий график');
-        attemptsChart.destroy();
-    }
-    
-    try {
-        // Создаем метки для последних 6 часов
+    function prepareChartDataFromAttempts(attempts) {
         const now = new Date();
+        const hours = 6;
+        
+        // Создаем массивы для каждого часа
         const labels = [];
+        const successfulData = Array(hours).fill(0);
+        const failedData = Array(hours).fill(0);
+        
+        // Генерируем метки
+        for (let i = hours - 1; i >= 0; i--) {
+            const hour = new Date(now);
+            hour.setHours(now.getHours() - i);
+            labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+        }
+        
+        // Заполняем данные из попыток
+        if (attempts && attempts.length > 0) {
+            attempts.forEach(attempt => {
+                try {
+                    const attemptTime = new Date(attempt.attempt_time || attempt.timestamp || Date.now());
+                    const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
+                    
+                    if (hourDiff >= 0 && hourDiff < hours) {
+                        const index = hours - 1 - hourDiff;
+                        if (attempt.success) {
+                            successfulData[index]++;
+                        } else {
+                            failedData[index]++;
+                        }
+                    }
+                } catch (e) {
+                    console.error('Ошибка обработки попытки для графика:', e);
+                }
+            });
+        }
+        
+        initChart({
+            labels: labels,
+            successful: successfulData,
+            failed: failedData
+        });
+    }
+    
+    function createTestChartData() {
+        const labels = [];
+        const now = new Date();
+        
         for (let i = 5; i >= 0; i--) {
             const hour = new Date(now);
             hour.setHours(now.getHours() - i);
             labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
         }
         
-        // Инициализируем данные нулями
-        const successData = Array(6).fill(0);
-        const failedData = Array(6).fill(0);
+        // Тестовые данные
+        const testData = {
+            labels: labels,
+            successful: [2, 3, 1, 0, 4, 2],
+            failed: [1, 0, 2, 1, 0, 1]
+        };
         
-        // Если есть реальные данные, заполняем ими
-        if (attempts && attempts.length > 0) {
-            console.log('📊 Обрабатываю', attempts.length, 'реальных попыток');
-            
-            attempts.forEach(attempt => {
-                const attemptTime = new Date(attempt.timestamp || attempt.attempt_time);
-                const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
-                
-                if (hourDiff >= 0 && hourDiff < 6) {
-                    const index = 5 - hourDiff;
-                    if (attempt.success) {
-                        successData[index]++;
-                    } else {
-                        failedData[index]++;
-                    }
-                }
-            });
-        } else {
-            console.log('📊 Нет реальных данных, использую тестовые');
-            // Тестовые данные для демонстрации
-            successData[0] = 2;  // текущий час
-            successData[1] = 3;  // 1 час назад
-            successData[2] = 1;  // 2 часа назад
-            failedData[0] = 1;   // текущий час
-            failedData[3] = 2;   // 3 часа назад
+        initChart(testData);
+    }
+    
+    function initChart(chartData) {
+        console.log('🎯 Инициализация графика с данными:', chartData);
+        
+        const canvas = document.getElementById('attemptsChart');
+        if (!canvas) {
+            console.error('❌ Canvas не найден!');
+            return;
         }
         
-        console.log('📊 Метки графика:', labels);
-        console.log('📊 Успешные данные:', successData);
-        console.log('📊 Неудачные данные:', failedData);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            console.error('❌ Не могу получить контекст 2D');
+            return;
+        }
         
-        // Сохраняем метки для использования в updateChartWithAttempt
-        chartData.labels = labels;
-        chartData.successData = successData;
-        chartData.failedData = failedData;
+        // Уничтожаем предыдущий график если есть
+        if (attemptsChart) {
+            console.log('🗑️ Уничтожаю предыдущий график');
+            attemptsChart.destroy();
+        }
         
-        attemptsChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Успешные',
-                        data: successData,
-                        backgroundColor: 'rgba(75, 192, 192, 0.8)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'Неудачные',
-                        data: failedData,
-                        backgroundColor: 'rgba(255, 99, 132, 0.8)',
-                        borderColor: 'rgba(255, 99, 132, 1)',
-                        borderWidth: 1
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        labels: {
-                            color: '#fff',
-                            font: {
-                                size: 14
-                            }
+        try {
+            attemptsChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: chartData.labels || [],
+                    datasets: [
+                        {
+                            label: 'Успешные',
+                            data: chartData.successful || [],
+                            backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1
+                        },
+                        {
+                            label: 'Неудачные',
+                            data: chartData.failed || [],
+                            backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1
                         }
-                    },
-                    title: {
-                        display: true,
-                        text: 'Попытки входа за последние 6 часов',
-                        color: '#fff',
-                        font: {
-                            size: 18
-                        }
-                    },
-                    tooltip: {
-                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                        titleColor: '#fff',
-                        bodyColor: '#fff'
-                    }
+                    ]
                 },
-                scales: {
-                    x: {
-                        ticks: { 
-                            color: '#fff',
-                            font: {
-                                size: 12
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#fff',
+                                font: {
+                                    size: 14
+                                }
                             }
                         },
-                        grid: { 
-                            color: 'rgba(255, 255, 255, 0.2)',
-                            drawBorder: true
-                        }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        ticks: { 
+                        title: {
+                            display: true,
+                            text: 'Попытки входа за последние 6 часов',
                             color: '#fff',
                             font: {
-                                size: 12
+                                size: 18
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { 
+                                color: '#fff',
+                                font: {
+                                    size: 12
+                                }
                             },
-                            stepSize: 1,
-                            precision: 0
+                            grid: { 
+                                color: 'rgba(255, 255, 255, 0.2)'
+                            }
                         },
-                        grid: { 
-                            color: 'rgba(255, 255, 255, 0.2)',
-                            drawBorder: true
+                        y: {
+                            beginAtZero: true,
+                            ticks: { 
+                                color: '#fff',
+                                font: {
+                                    size: 12
+                                },
+                                stepSize: 1
+                            },
+                            grid: { 
+                                color: 'rgba(255, 255, 255, 0.2)'
+                            }
                         }
                     }
                 }
-            }
-        });
-        
-        console.log('✅ График успешно создан!');
-        
-    } catch (error) {
-        console.error('❌ Ошибка создания графика:', error);
-        console.error('❌ Подробности:', error.message, error.stack);
-    }
-}
-    
-    function updateChartData(attempts) {
-        const now = new Date();
-        
-        // Сбрасываем данные
-        chartData.successData = Array(12).fill(0);
-        chartData.failedData = Array(12).fill(0);
-        
-        // Считаем попытки за последний час (разбиваем на 12 интервалов по 5 минут)
-        attempts.forEach(attempt => {
-            const attemptTime = new Date(attempt.attempt_time || attempt.timestamp);
-            const minutesDiff = Math.floor((now - attemptTime) / (1000 * 60));
-            
-            if (minutesDiff >= 0 && minutesDiff < 60) {
-                const intervalIndex = Math.floor(minutesDiff / 5);
-                if (intervalIndex >= 0 && intervalIndex < 12) {
-                    if (attempt.success) {
-                        chartData.successData[11 - intervalIndex]++;
-                    } else {
-                        chartData.failedData[11 - intervalIndex]++;
-                    }
-                }
-            }
-        });
-    }
-    
-function updateChartWithAttempt(attempt) {
-    if (!attemptsChart) {
-        console.log('📊 График еще не инициализирован');
-        return;
-    }
-    
-    console.log('📊 Обновляю график с новой попыткой:', attempt);
-    
-    // Получаем текущее время
-    const now = new Date();
-    const attemptTime = new Date(attempt.timestamp || attempt.attempt_time);
-    
-    // Разница в часах (округление в меньшую сторону)
-    const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
-    console.log('📊 Разница в часах:', hourDiff);
-    
-    // Если попытка в последние 6 часов
-    if (hourDiff >= 0 && hourDiff < 6) {
-        const index = 5 - hourDiff;
-        console.log('📊 Индекс для обновления:', index);
-        
-        // Проверяем корректность индекса
-        if (index >= 0 && index < 6) {
-            // Обновляем данные в графике
-            if (attempt.success) {
-                attemptsChart.data.datasets[0].data[index]++;
-                chartData.successData[index] = attemptsChart.data.datasets[0].data[index];
-            } else {
-                attemptsChart.data.datasets[1].data[index]++;
-                chartData.failedData[index] = attemptsChart.data.datasets[1].data[index];
-            }
-            
-            // Обновляем график с анимацией
-            attemptsChart.update('active');
-            console.log('📊 График обновлен. Новые данные:', {
-                успешные: attemptsChart.data.datasets[0].data,
-                неудачные: attemptsChart.data.datasets[1].data
             });
-        } else {
-            console.error('❌ Неверный индекс:', index);
+            
+            console.log('✅ График успешно создан!');
+            
+        } catch (error) {
+            console.error('❌ Ошибка создания графика:', error);
+            canvas.innerHTML = '<div class="error-state">Ошибка создания графика</div>';
         }
-    } else {
-        console.log('📊 Попытка вне диапазона графика (больше 6 часов или в будущем)');
     }
-}
-
+    
     // Загрузка начальных данных
     function loadInitialData() {
+        console.log('📥 Загружаю начальные данные...');
+        
+        // Загружаем статистику
         fetch('http://localhost:8000/api/stats')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     updateStats(data.data);
                 }
             })
-            .catch(err => console.error('Ошибка загрузки статистики:', err));
+            .catch(err => {
+                console.error('Ошибка загрузки статистики:', err);
+                showError('Не удалось загрузить статистику. Проверьте подключение к серверу.');
+            });
         
-        fetch('http://localhost:8000/api/attempts?limit=50')
-            .then(response => response.json())
+        // Загружаем последние попытки
+        fetch('http://localhost:8000/api/attempts?limit=20')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     updateAttemptsList(data.data);
-                    if (!attemptsChart) {
-                        initChart(data.data);
-                    } else {
-                        updateChartData(data.data);
-                        attemptsChart.data.datasets[0].data = chartData.successData;
-                        attemptsChart.data.datasets[1].data = chartData.failedData;
-                        attemptsChart.update();
-                    }
+                    // Загружаем данные для графика после успешной загрузки попыток
+                    loadChartData();
                 }
             })
-            .catch(err => console.error('Ошибка загрузки попыток:', err));
+            .catch(err => {
+                console.error('Ошибка загрузки попыток:', err);
+                showError('Не удалось загрузить историю попыток. Проверьте подключение к серверу.');
+            });
     }
     
     // Инициализация при загрузке страницы
     window.addEventListener('load', () => {
+        console.log('🚀 Страница загружена');
+        
+        // Сначала загружаем данные через HTTP
         loadInitialData();
-        connectWebSocket();
         
-        // Автоматическое обновление каждые 10 секунд (fallback)
-        setInterval(loadInitialData, 10000);
+        // Затем подключаемся к WebSocket
+        setTimeout(() => {
+            connectWebSocket();
+        }, 1000);
         
-        // Обновляем время на графике каждую минуту
+        // Автоматическое обновление каждые 30 секунд (fallback)
         setInterval(() => {
-            if (attemptsChart) {
-                const now = new Date();
-                chartData.labels = Array.from({length: 12}, (_, i) => {
-                    const time = new Date(now);
-                    time.setMinutes(now.getMinutes() - (11 - i) * 5);
-                    return time.getHours().toString().padStart(2, '0') + ':' + 
-                           time.getMinutes().toString().padStart(2, '0');
-                });
-                attemptsChart.data.labels = chartData.labels;
-                attemptsChart.update();
+            if (!isInitialDataLoaded || !ws || ws.readyState !== WebSocket.OPEN) {
+                console.log('🔄 Fallback обновление данных...');
+                loadInitialData();
             }
-        }, 60000);
+        }, 30000);
     });
 </script>
 </body>

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 import uvicorn
 import asyncio
 
@@ -18,7 +18,7 @@ app = FastAPI(title="Login Monitor API", version="1.0")
 # Разрешаем CORS для всех доменов
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Разрешаем все домены
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,32 +49,41 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 # WebSocket подключения для мониторинга
-monitor_connections: List[WebSocket] = []
-
-async def broadcast_to_monitors(event_type: str, data: dict):
-    """Отправить событие всем мониторам"""
-    message = {
-        "type": event_type,
-        "data": data,
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # Удаляем отключенные соединения
-    dead_connections = []
-    for websocket in monitor_connections:
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+        
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"✅ WebSocket подключен. Всего подключений: {len(self.active_connections)}")
+        
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            print(f"📴 WebSocket отключен. Осталось: {len(self.active_connections)}")
+            
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
         try:
             await websocket.send_json(message)
         except:
-            dead_connections.append(websocket)
-    
-    for websocket in dead_connections:
-        if websocket in monitor_connections:
-            monitor_connections.remove(websocket)
+            self.disconnect(websocket)
+            
+    async def broadcast(self, message: dict):
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except:
+                disconnected.append(connection)
+        for connection in disconnected:
+            self.disconnect(connection)
+
+manager = ConnectionManager()
 
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(request: LoginRequest):
     """Обработка попытки входа"""
-    # В реальном приложении получаем IP из запроса
     client_ip = "127.0.0.1"
     
     # Хешируем пароль для проверки
@@ -97,7 +106,7 @@ async def login(request: LoginRequest):
         message = "Неверный логин или пароль"
     
     # Сохраняем попытку в БД
-    db.add_attempt(
+    attempt_id = db.add_attempt(
         username=request.username,
         ip_address=client_ip,
         client_type=request.client_type,
@@ -113,15 +122,22 @@ async def login(request: LoginRequest):
         }
     )
     
+    # Получаем полные данные о попытке
+    cursor = db.conn.cursor()
+    cursor.execute('SELECT * FROM login_attempts WHERE id = ?', (attempt_id,))
+    row = cursor.fetchone()
+    
+    attempt_data = {}
+    if row:
+        columns = [desc[0] for desc in cursor.description]
+        attempt_data = dict(zip(columns, row))
+        attempt_data['success'] = bool(attempt_data['success'])
+    
     # Отправляем событие мониторам
-    await broadcast_to_monitors("login_attempt", {
-        "username": request.username,
-        "ip_address": client_ip,
-        "client_type": request.client_type,
-        "success": is_valid,
-        "reason": reason,
-        "timestamp": datetime.now().isoformat(),
-        "user_agent": request.user_agent
+    await manager.broadcast({
+        "type": "login_attempt",
+        "data": attempt_data,
+        "timestamp": datetime.now().isoformat()
     })
     
     return LoginResponse(
@@ -142,6 +158,7 @@ async def get_stats():
 async def get_attempts(limit: int = 100):
     """Получить историю попыток"""
     attempts = db.get_recent_attempts(limit)
+    
     return {
         "success": True,
         "data": attempts,
@@ -149,37 +166,125 @@ async def get_attempts(limit: int = 100):
         "timestamp": datetime.now().isoformat()
     }
 
+@app.get("/api/attempts_for_chart")
+async def get_attempts_for_chart(hours: int = 6):
+    """Получить данные для графика за последние N часов"""
+    cursor = db.conn.cursor()
+    
+    # Получаем попытки за последние N часов
+    cursor.execute('''
+        SELECT * FROM login_attempts 
+        WHERE datetime(attempt_time) > datetime('now', ?)
+        ORDER BY attempt_time ASC
+    ''', (f'-{hours} hours',))
+    
+    columns = [desc[0] for desc in cursor.description]
+    attempts = []
+    for row in cursor.fetchall():
+        attempt = dict(zip(columns, row))
+        attempt['success'] = bool(attempt['success'])
+        attempts.append(attempt)
+    
+    # Создаем данные для графика по часам
+    chart_data = {
+        "labels": [],
+        "successful": [],
+        "failed": []
+    }
+    
+    # Генерируем метки для каждого часа
+    now = datetime.now()
+    
+    for i in range(hours):
+        hour_start = now - timedelta(hours=hours - i - 1)
+        hour_end = hour_start + timedelta(hours=1)
+        
+        # Форматируем метку
+        label = hour_start.strftime("%H:00")
+        chart_data["labels"].append(label)
+        
+        # Считаем попытки за этот час
+        successful = 0
+        failed = 0
+        
+        for attempt in attempts:
+            attempt_time_str = attempt['attempt_time']
+            if isinstance(attempt_time_str, str):
+                if 'Z' in attempt_time_str:
+                    attempt_time_str = attempt_time_str.replace('Z', '+00:00')
+                attempt_time = datetime.fromisoformat(attempt_time_str)
+            else:
+                # Если это уже datetime объект
+                attempt_time = attempt_time_str
+                
+            if hour_start <= attempt_time < hour_end:
+                if attempt['success']:
+                    successful += 1
+                else:
+                    failed += 1
+        
+        chart_data["successful"].append(successful)
+        chart_data["failed"].append(failed)
+    
+    return {
+        "success": True,
+        "data": chart_data,
+        "total_attempts": len(attempts),
+        "timestamp": datetime.now().isoformat()
+    }
+
 @app.websocket("/ws/monitor")
 async def websocket_monitor(websocket: WebSocket):
     """WebSocket для мониторинга в реальном времени"""
-    await websocket.accept()
-    monitor_connections.append(websocket)
+    await manager.connect(websocket)
     
     try:
         # Отправляем начальные данные
-        await websocket.send_json({
+        await manager.send_personal_message({
             "type": "init",
             "data": {
                 "stats": db.get_stats(),
                 "recent_attempts": db.get_recent_attempts(20)
             },
             "timestamp": datetime.now().isoformat()
-        })
+        }, websocket)
         
-        # Периодически отправляем обновления
+        # Бесконечный цикл для поддержания соединения
         while True:
-            await asyncio.sleep(2)  # Каждые 2 секунды
-            await websocket.send_json({
-                "type": "stats_update",
-                "data": db.get_stats(),
-                "timestamp": datetime.now().isoformat()
-            })
+            try:
+                # Ожидаем сообщение от клиента с таймаутом
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
                 
-    except (WebSocketDisconnect, Exception) as e:
-        print(f"WebSocket отключен: {e}")
+                # Обрабатываем пинг
+                if data.strip().lower() == "ping":
+                    await manager.send_personal_message({
+                        "type": "pong",
+                        "timestamp": datetime.now().isoformat()
+                    }, websocket)
+                elif data.strip().lower() == "get_stats":
+                    # По запросу отправляем обновленную статистику
+                    await manager.send_personal_message({
+                        "type": "stats_update",
+                        "data": db.get_stats(),
+                        "timestamp": datetime.now().isoformat()
+                    }, websocket)
+                    
+            except asyncio.TimeoutError:
+                # Таймаут - отправляем keep-alive сообщение
+                try:
+                    await manager.send_personal_message({
+                        "type": "keep_alive",
+                        "timestamp": datetime.now().isoformat()
+                    }, websocket)
+                except:
+                    break  # Соединение разорвано
+                    
+    except WebSocketDisconnect:
+        print("📴 WebSocket отключен клиентом")
+    except Exception as e:
+        print(f"❌ WebSocket ошибка: {e}")
     finally:
-        if websocket in monitor_connections:
-            monitor_connections.remove(websocket)
+        manager.disconnect(websocket)
 
 @app.get("/")
 async def root():
@@ -191,6 +296,7 @@ async def root():
             "login": "POST /api/auth/login",
             "stats": "GET /api/stats",
             "attempts": "GET /api/attempts",
+            "chart_data": "GET /api/attempts_for_chart?hours=6",
             "websocket": "WS /ws/monitor"
         },
         "demo_users": list(USERS.keys())
@@ -204,4 +310,11 @@ if __name__ == "__main__":
     print("👤 Демо пользователи:", list(USERS.keys()))
     print("=" * 50)
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=8000, 
+        log_level="info",
+        ws_ping_interval=20,
+        ws_ping_timeout=30
+    )
