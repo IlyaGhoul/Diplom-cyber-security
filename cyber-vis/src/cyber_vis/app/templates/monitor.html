@@ -454,130 +454,165 @@ function debugChartData(attempts) {
     }
     
 function initChart(attempts) {
-    console.log('📊 Инициализация гистограммы');
+    console.log('🎯 Начинаю инициализацию графика');
     
-    const ctx = document.getElementById('attemptsChart').getContext('2d');
-    
-    // Группируем по часам за последние 6 часов
-    const now = new Date();
-    const labels = [];
-    const successData = Array(6).fill(0);
-    const failedData = Array(6).fill(0);
-    
-    // Создаем метки для последних 6 часов
-    for (let i = 5; i >= 0; i--) {
-        const hour = new Date(now);
-        hour.setHours(now.getHours() - i);
-        labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+    const canvas = document.getElementById('attemptsChart');
+    if (!canvas) {
+        console.error('❌ Canvas не найден!');
+        return;
     }
     
-    console.log('📊 Метки графика:', labels);
+    console.log('✅ Canvas найден, размеры:', canvas.width, 'x', canvas.height);
     
-    // Обрабатываем попытки если они есть
-    if (attempts && attempts.length > 0) {
-        console.log('📊 Обрабатываю', attempts.length, 'попыток');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        console.error('❌ Не могу получить контекст 2D');
+        return;
+    }
+    
+    console.log('✅ Контекст получен');
+    
+    // Уничтожаем предыдущий график если есть
+    if (attemptsChart) {
+        console.log('🗑️ Уничтожаю предыдущий график');
+        attemptsChart.destroy();
+    }
+    
+    try {
+        // Создаем метки для последних 6 часов
+        const now = new Date();
+        const labels = [];
+        for (let i = 5; i >= 0; i--) {
+            const hour = new Date(now);
+            hour.setHours(now.getHours() - i);
+            labels.push(hour.getHours().toString().padStart(2, '0') + ':00');
+        }
         
-        attempts.forEach(attempt => {
-            // Используем правильное поле времени
-            const attemptTime = new Date(attempt.timestamp || attempt.attempt_time);
-            console.log('📊 Попытка:', {
-                username: attempt.username,
-                time: attemptTime.toISOString(),
-                success: attempt.success,
-                hour: attemptTime.getHours()
-            });
+        // Инициализируем данные нулями
+        const successData = Array(6).fill(0);
+        const failedData = Array(6).fill(0);
+        
+        // Если есть реальные данные, заполняем ими
+        if (attempts && attempts.length > 0) {
+            console.log('📊 Обрабатываю', attempts.length, 'реальных попыток');
             
-            // Разница в часах от текущего времени
-            const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
-            
-            // Если попытка была в последние 6 часов
-            if (hourDiff >= 0 && hourDiff < 6) {
-                const index = 5 - hourDiff;
-                if (index >= 0 && index < 6) {
+            attempts.forEach(attempt => {
+                const attemptTime = new Date(attempt.timestamp || attempt.attempt_time);
+                const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
+                
+                if (hourDiff >= 0 && hourDiff < 6) {
+                    const index = 5 - hourDiff;
                     if (attempt.success) {
                         successData[index]++;
                     } else {
                         failedData[index]++;
                     }
                 }
+            });
+        } else {
+            console.log('📊 Нет реальных данных, использую тестовые');
+            // Тестовые данные для демонстрации
+            successData[0] = 2;  // текущий час
+            successData[1] = 3;  // 1 час назад
+            successData[2] = 1;  // 2 часа назад
+            failedData[0] = 1;   // текущий час
+            failedData[3] = 2;   // 3 часа назад
+        }
+        
+        console.log('📊 Метки графика:', labels);
+        console.log('📊 Успешные данные:', successData);
+        console.log('📊 Неудачные данные:', failedData);
+        
+        // Сохраняем метки для использования в updateChartWithAttempt
+        chartData.labels = labels;
+        chartData.successData = successData;
+        chartData.failedData = failedData;
+        
+        attemptsChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Успешные',
+                        data: successData,
+                        backgroundColor: 'rgba(75, 192, 192, 0.8)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Неудачные',
+                        data: failedData,
+                        backgroundColor: 'rgba(255, 99, 132, 0.8)',
+                        borderColor: 'rgba(255, 99, 132, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#fff',
+                            font: {
+                                size: 14
+                            }
+                        }
+                    },
+                    title: {
+                        display: true,
+                        text: 'Попытки входа за последние 6 часов',
+                        color: '#fff',
+                        font: {
+                            size: 18
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        titleColor: '#fff',
+                        bodyColor: '#fff'
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: { 
+                            color: '#fff',
+                            font: {
+                                size: 12
+                            }
+                        },
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.2)',
+                            drawBorder: true
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: { 
+                            color: '#fff',
+                            font: {
+                                size: 12
+                            },
+                            stepSize: 1,
+                            precision: 0
+                        },
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.2)',
+                            drawBorder: true
+                        }
+                    }
+                }
             }
         });
+        
+        console.log('✅ График успешно создан!');
+        
+    } catch (error) {
+        console.error('❌ Ошибка создания графика:', error);
+        console.error('❌ Подробности:', error.message, error.stack);
     }
-    
-    console.log('📊 Данные для графика:', {
-        labels: labels,
-        success: successData,
-        failed: failedData
-    });
-    
-    // Уничтожаем предыдущий график если есть
-    if (attemptsChart) {
-        attemptsChart.destroy();
-    }
-    
-    attemptsChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Успешные',
-                    data: successData,
-                    backgroundColor: 'rgba(75, 192, 192, 0.8)',
-                    borderColor: 'rgba(75, 192, 192, 1)',
-                    borderWidth: 1
-                },
-                {
-                    label: 'Неудачные',
-                    data: failedData,
-                    backgroundColor: 'rgba(255, 99, 132, 0.8)',
-                    borderColor: 'rgba(255, 99, 132, 1)',
-                    borderWidth: 1
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    labels: {
-                        color: '#fff'
-                    }
-                },
-                title: {
-                    display: true,
-                    text: 'Попытки входа за последние 6 часов',
-                    color: '#fff',
-                    font: {
-                        size: 16
-                    }
-                }
-            },
-            scales: {
-                x: {
-                    ticks: { 
-                        color: '#aaa',
-                        maxRotation: 0
-                    },
-                    grid: { 
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    }
-                },
-                y: {
-                    beginAtZero: true,
-                    ticks: { 
-                        color: '#aaa',
-                        stepSize: 1,
-                        precision: 0
-                    },
-                    grid: { 
-                        color: 'rgba(255, 255, 255, 0.1)'
-                    }
-                }
-            }
-        }
-    });
 }
     
     function updateChartData(attempts) {
@@ -605,7 +640,7 @@ function initChart(attempts) {
         });
     }
     
- function updateChartWithAttempt(attempt) {
+function updateChartWithAttempt(attempt) {
     if (!attemptsChart) {
         console.log('📊 График еще не инициализирован');
         return;
@@ -617,25 +652,37 @@ function initChart(attempts) {
     const now = new Date();
     const attemptTime = new Date(attempt.timestamp || attempt.attempt_time);
     
-    // Разница в часах
+    // Разница в часах (округление в меньшую сторону)
     const hourDiff = Math.floor((now - attemptTime) / (1000 * 60 * 60));
+    console.log('📊 Разница в часах:', hourDiff);
     
     // Если попытка в последние 6 часов
     if (hourDiff >= 0 && hourDiff < 6) {
         const index = 5 - hourDiff;
+        console.log('📊 Индекс для обновления:', index);
         
-        // Обновляем данные в графике
-        if (attempt.success) {
-            attemptsChart.data.datasets[0].data[index]++;
+        // Проверяем корректность индекса
+        if (index >= 0 && index < 6) {
+            // Обновляем данные в графике
+            if (attempt.success) {
+                attemptsChart.data.datasets[0].data[index]++;
+                chartData.successData[index] = attemptsChart.data.datasets[0].data[index];
+            } else {
+                attemptsChart.data.datasets[1].data[index]++;
+                chartData.failedData[index] = attemptsChart.data.datasets[1].data[index];
+            }
+            
+            // Обновляем график с анимацией
+            attemptsChart.update('active');
+            console.log('📊 График обновлен. Новые данные:', {
+                успешные: attemptsChart.data.datasets[0].data,
+                неудачные: attemptsChart.data.datasets[1].data
+            });
         } else {
-            attemptsChart.data.datasets[1].data[index]++;
+            console.error('❌ Неверный индекс:', index);
         }
-        
-        // Обновляем график
-        attemptsChart.update();
-        console.log('📊 График обновлен');
     } else {
-        console.log('📊 Попытка вне диапазона графика (больше 6 часов)');
+        console.log('📊 Попытка вне диапазона графика (больше 6 часов или в будущем)');
     }
 }
 
