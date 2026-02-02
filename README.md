@@ -22,6 +22,7 @@ text
 
 
 ## 🏗️ Архитектура
+<img width="392" height="403" alt="{F40640AE-2F70-4671-8A69-A8420C31BB30}" src="https://github.com/user-attachments/assets/d47733fb-ba16-4d58-bec9-d3fbae7284f6" />
 
 ## 🚀 Быстрый старт
 
