@@ -400,6 +400,18 @@
                 <div class="stat-value" id="uniqueUsers">0</div>
                 <div class="stat-label">Уникальных пользователей</div>
             </div>
+            <!-- Добавляем новую карточку для IP -->
+            <div class="stat-card">
+                <div class="stat-icon">🌐</div>
+                <div class="stat-value" id="uniqueIPs">0</div>
+                <div class="stat-label">Уникальных IP</div>
+            </div>
+            <!-- Можно добавить еще одну карточку -->
+            <div class="stat-card">
+                <div class="stat-icon">🕐</div>
+                <div class="stat-value" id="lastHourAttempts">0</div>
+                <div class="stat-label">За последний час</div>
+            </div>
         </div>
         
         <div class="chart-section">
@@ -478,7 +490,50 @@
             </div>
         `;
     }
-    
+
+    // Рендеринг одной попытки
+    function renderAttemptItem(attempt, container) {
+        const attemptEl = document.createElement('div');
+        attemptEl.className = `attempt-item ${attempt.success ? 'success' : 'failed'}`;
+        attemptEl.style.animation = 'slideIn 0.3s ease';
+        
+        const time = new Date(attempt.timestamp || attempt.attempt_time || Date.now());
+        const timeStr = time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const dateStr = time.toLocaleDateString();
+        
+        // Форматируем IP-адрес
+        let ipHtml = '';
+        if (attempt.ip_address) {
+            ipHtml = `
+                <div style="margin-top: 5px; font-size: 0.85em;">
+                    <span style="color: #888;">🌐 IP:</span>
+                    <span style="color: #4cc9f0; font-family: monospace;">${attempt.ip_address}</span>
+                </div>
+            `;
+        }
+        
+        attemptEl.innerHTML = `
+            <div class="attempt-header">
+                <div class="attempt-username">${attempt.username || 'Неизвестно'}</div>
+                <div class="attempt-time">${dateStr} ${timeStr}</div>
+            </div>
+            <div class="attempt-info">
+                <div>
+                    <span class="attempt-badge ${attempt.success ? 'badge-success' : 'badge-failed'}">
+                        ${attempt.success ? '✅ Успешно' : '❌ Неудачно'}
+                    </span>
+                    <span style="margin-left: 10px;">${attempt.reason || ''}</span>
+                </div>
+                <div>
+                    <span>${attempt.client_type || ''}</span>
+                </div>
+            </div>
+            ${ipHtml}
+        `;
+        
+        container.appendChild(attemptEl);
+    }
+
     // Скрыть ошибку
     function hideError() {
         const errorContainer = document.getElementById('errorContainer');
@@ -626,6 +681,8 @@
         document.getElementById('successfulAttempts').textContent = stats.successful || 0;
         document.getElementById('failedAttempts').textContent = stats.failed || 0;
         document.getElementById('uniqueUsers').textContent = stats.unique_users || 0;
+        document.getElementById('uniqueIPs').textContent = stats.unique_ips || 0;
+        document.getElementById('lastHourAttempts').textContent = stats.last_hour || 0;
     }
     
     // Обновление статистики после попытки

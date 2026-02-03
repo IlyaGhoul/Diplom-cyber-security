@@ -1,7 +1,7 @@
 """
 FastAPI сервер с WebSocket для системы мониторинга
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request  # Добавили Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 import uvicorn
 import asyncio
-import sqlite3  # Добавляем импорт
+import sqlite3
 
 from database import db
 
@@ -36,6 +36,28 @@ class LoginRequest(BaseModel):
 class LoginResponse(BaseModel):
     success: bool
     message: str
+
+# Функция для получения IP-адреса
+def get_client_ip(request: Request) -> str:
+    """Получение реального IP-адреса клиента"""
+    # Пробуем получить из заголовка X-Forwarded-For (если за прокси)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # Берем первый IP из списка
+        client_ip = forwarded.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    
+    # Пробуем получить из заголовка X-Real-IP
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    
+    # Если заголовков нет, используем host
+    if request.client and request.client.host:
+        return request.client.host
+    
+    return "127.0.0.1"  # fallback
 
 # Хеш паролей
 def hash_password(password: str) -> str:
@@ -85,12 +107,14 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 @app.post("/api/auth/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_request: Request):
     """Обработка попытки входа"""
-    client_ip = "127.0.0.1"
+    # Получаем реальный IP-адрес
+    client_ip = get_client_ip(http_request)
     
     print(f"🔍 Попытка входа:")
     print(f"   Пользователь: {request.username}")
+    print(f"   IP-адрес: {client_ip}")
     print(f"   Введенный пароль: {request.password}")
     print(f"   Хеш введенного пароля: {hash_password(request.password)}")
     print(f"   Сохраненный хеш: {USERS.get(request.username)}")
@@ -125,7 +149,7 @@ async def login(request: LoginRequest):
     # Сохраняем попытку в БД
     attempt_id = db.add_attempt(
         username=request.username,
-        ip_address=client_ip,
+        ip_address=client_ip,  # Используем реальный IP
         client_type=request.client_type,
         success=is_valid,
         reason=reason,
@@ -134,7 +158,8 @@ async def login(request: LoginRequest):
             "timestamp": datetime.now().isoformat(),
             "client_info": {
                 "type": request.client_type,
-                "user_agent": request.user_agent
+                "user_agent": request.user_agent,
+                "ip_address": client_ip
             }
         }
     )
@@ -142,7 +167,6 @@ async def login(request: LoginRequest):
     print(f"   Попытка сохранена с ID: {attempt_id}")
     
     # Получаем полные данные о попытке
-    # ИСПРАВЛЕНО: используем новое соединение вместо db.conn
     with sqlite3.connect(db.db_path) as conn:
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM login_attempts WHERE id = ?', (attempt_id,))

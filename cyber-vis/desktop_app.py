@@ -66,19 +66,27 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             logger.info(f"Начинаю отправку данных на сервер")
             logger.debug(f"Данные для отправки: username={username}, password={'*' * len(password)}")
             
-            # Создаем JSON данные
+            # Создаем JSON данные с User-Agent
             json_data = {
                 "username": username,
                 "password": password,
-                "client_type": "desktop"
+                "client_type": "desktop",
+                "user_agent": "PyQt-Auth-Client/1.0"
             }
             
             logger.debug(f"JSON данные: {json_data}")
             logger.debug(f"URL: http://localhost:8000/api/auth/login")
             
+            # Отправляем с заголовками
+            headers = {
+                'User-Agent': 'PyQt-Auth-Client/1.0',
+                'Content-Type': 'application/json'
+            }
+            
             response = requests.post(
                 "http://localhost:8000/api/auth/login",
                 json=json_data,
+                headers=headers,
                 timeout=3
             )
             
