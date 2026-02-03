@@ -7,9 +7,10 @@ from pydantic import BaseModel
 from typing import Optional, List
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 import uvicorn
 import asyncio
+import sqlite3  # Добавляем импорт
 
 from database import db
 
@@ -36,17 +37,19 @@ class LoginResponse(BaseModel):
     success: bool
     message: str
 
-# Предустановленные пользователи
-USERS = {
+# Хеш паролей
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Создаем словарь с хешированными паролями
+RAW_USERS = {
     "ilya": "1111",
     "admin": "admin123",
     "test": "test123",
     "user": "password"
 }
 
-# Хеш паролей
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+USERS = {username: hash_password(password) for username, password in RAW_USERS.items()}
 
 # WebSocket подключения для мониторинга
 class ConnectionManager:
@@ -86,23 +89,37 @@ async def login(request: LoginRequest):
     """Обработка попытки входа"""
     client_ip = "127.0.0.1"
     
-    # Хешируем пароль для проверки
-    password_hash = hash_password(request.password)
+    print(f"🔍 Попытка входа:")
+    print(f"   Пользователь: {request.username}")
+    print(f"   Введенный пароль: {request.password}")
+    print(f"   Хеш введенного пароля: {hash_password(request.password)}")
+    print(f"   Сохраненный хеш: {USERS.get(request.username)}")
     
-    # Проверяем учетные данные
+    # Получаем сохраненный хеш пароля для пользователя
+    saved_password_hash = USERS.get(request.username)
+    
+    # Хешируем введенный пароль
+    input_password_hash = hash_password(request.password)
+    
+    # Проверяем учетные данные - сравниваем хеши
     is_valid = False
     reason = ""
     
-    if request.username in USERS and hash_password(USERS[request.username]) == password_hash:
+    if request.username in USERS and input_password_hash == saved_password_hash:
         is_valid = True
         reason = "Успешная авторизация"
         message = f"Добро пожаловать, {request.username}!"
+        print(f"   ✅ Авторизация успешна")
     else:
         is_valid = False
         if request.username in USERS:
             reason = "Неверный пароль"
+            print(f"   ❌ Неверный пароль")
+            print(f"   Введенный хеш: {input_password_hash}")
+            print(f"   Ожидаемый хеш: {saved_password_hash}")
         else:
             reason = "Пользователь не найден"
+            print(f"   ❌ Пользователь не найден")
         message = "Неверный логин или пароль"
     
     # Сохраняем попытку в БД
@@ -122,16 +139,20 @@ async def login(request: LoginRequest):
         }
     )
     
-    # Получаем полные данные о попытке
-    cursor = db.conn.cursor()
-    cursor.execute('SELECT * FROM login_attempts WHERE id = ?', (attempt_id,))
-    row = cursor.fetchone()
+    print(f"   Попытка сохранена с ID: {attempt_id}")
     
-    attempt_data = {}
-    if row:
-        columns = [desc[0] for desc in cursor.description]
-        attempt_data = dict(zip(columns, row))
-        attempt_data['success'] = bool(attempt_data['success'])
+    # Получаем полные данные о попытке
+    # ИСПРАВЛЕНО: используем новое соединение вместо db.conn
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM login_attempts WHERE id = ?', (attempt_id,))
+        row = cursor.fetchone()
+        
+        attempt_data = {}
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            attempt_data = dict(zip(columns, row))
+            attempt_data['success'] = bool(attempt_data['success'])
     
     # Отправляем событие мониторам
     await manager.broadcast({
@@ -169,42 +190,44 @@ async def get_attempts(limit: int = 100):
 @app.get("/api/chart_data")
 async def get_chart_data():
     """Получить данные для графика - только успешные и неудачные попытки"""
-    cursor = db.conn.cursor()
-    
-    try:
-        # Получаем общее количество успешных и неудачных попыток
-        cursor.execute('''
-            SELECT 
-                COUNT(CASE WHEN success = 1 THEN 1 END) as successful,
-                COUNT(CASE WHEN success = 0 THEN 1 END) as failed
-            FROM login_attempts
-        ''')
+    # ИСПРАВЛЕНО: используем новое соединение вместо db.conn
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.cursor()
         
-        row = cursor.fetchone()
-        successful = row[0] or 0
-        failed = row[1] or 0
-        
-        chart_data = {
-            "total": {
-                "successful": successful,
-                "failed": failed,
-                "total": successful + failed
+        try:
+            # Получаем общее количество успешных и неудачных попыток
+            cursor.execute('''
+                SELECT 
+                    COUNT(CASE WHEN success = 1 THEN 1 END) as successful,
+                    COUNT(CASE WHEN success = 0 THEN 1 END) as failed
+                FROM login_attempts
+            ''')
+            
+            row = cursor.fetchone()
+            successful = row[0] or 0
+            failed = row[1] or 0
+            
+            chart_data = {
+                "total": {
+                    "successful": successful,
+                    "failed": failed,
+                    "total": successful + failed
+                }
             }
-        }
-        
-        return {
-            "success": True,
-            "data": chart_data,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-    except Exception as e:
-        print(f"❌ Ошибка получения данных графика: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
+            
+            return {
+                "success": True,
+                "data": chart_data,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения данных графика: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
 @app.websocket("/ws/monitor")
 async def websocket_monitor(websocket: WebSocket):
@@ -279,7 +302,7 @@ async def root():
             "chart_data": "GET /api/chart_data",
             "websocket": "WS /ws/monitor"
         },
-        "demo_users": list(USERS.keys())
+        "demo_users": list(RAW_USERS.keys())
     }
 
 if __name__ == "__main__":
@@ -287,7 +310,7 @@ if __name__ == "__main__":
     print("🚀 Сервер мониторинга запущен")
     print("📡 API: http://localhost:8000")
     print("📊 Веб-мониторинг: http://localhost:8080")
-    print("👤 Демо пользователи:", list(USERS.keys()))
+    print("👤 Демо пользователи:", list(RAW_USERS.keys()))
     print("=" * 50)
     
     uvicorn.run(
