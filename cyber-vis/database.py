@@ -60,11 +60,13 @@ class LoginDatabase:
             ''', (limit,))
             return [dict(row) for row in cursor.fetchall()]
     
+    # В методе get_stats класса LoginDatabase:
     def get_stats(self):
         """Получить статистику"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             
+            # Основная статистика
             cursor.execute('''
                 SELECT 
                     COUNT(*) as total_attempts,
@@ -76,13 +78,32 @@ class LoginDatabase:
             ''')
             row = cursor.fetchone()
             
-            # Попытки за последний час
+            # Попытки за последний час (динамически считаем каждый раз)
             cursor.execute('''
                 SELECT COUNT(*) as last_hour
                 FROM login_attempts 
                 WHERE datetime(attempt_time) > datetime('now', '-1 hour')
             ''')
-            last_hour = cursor.fetchone()[0] or 0
+            last_hour_row = cursor.fetchone()
+            last_hour = last_hour_row[0] if last_hour_row else 0
+            
+            # Попытки за последние 30 минут
+            cursor.execute('''
+                SELECT COUNT(*) as last_30_min
+                FROM login_attempts 
+                WHERE datetime(attempt_time) > datetime('now', '-30 minutes')
+            ''')
+            last_30_min_row = cursor.fetchone()
+            last_30_min = last_30_min_row[0] if last_30_min_row else 0
+            
+            # Попытки за последние 10 минут
+            cursor.execute('''
+                SELECT COUNT(*) as last_10_min
+                FROM login_attempts 
+                WHERE datetime(attempt_time) > datetime('now', '-10 minutes')
+            ''')
+            last_10_min_row = cursor.fetchone()
+            last_10_min = last_10_min_row[0] if last_10_min_row else 0
             
             return {
                 'total_attempts': row[0] or 0,
@@ -90,7 +111,10 @@ class LoginDatabase:
                 'failed': row[2] or 0,
                 'unique_users': row[3] or 0,
                 'unique_ips': row[4] or 0,
-                'last_hour': last_hour
+                'last_hour': last_hour,
+                'last_30_min': last_30_min,
+                'last_10_min': last_10_min,
+                'timestamp': datetime.now().isoformat()  # Добавляем метку времени
             }
 
 # Глобальный экземпляр БД

@@ -410,7 +410,19 @@
             <div class="stat-card">
                 <div class="stat-icon">🕐</div>
                 <div class="stat-value" id="lastHourAttempts">0</div>
-                <div class="stat-label">За последний час</div>
+                <div class="stat-label">
+                    <div>За последний</div>
+                    <div>час</div>
+                </div>
+            </div>
+            <!-- Можно добавить еще одну карточку для 10 минут -->
+            <div class="stat-card">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-value" id="last10MinAttempts">0</div>
+                <div class="stat-label">
+                    <div>За 10</div>
+                    <div>минут</div>
+                </div>
             </div>
         </div>
         
@@ -476,6 +488,7 @@
     let chartUpdateTimer = null;
     let liveAttempts = [];
     let recentAttempts = [];
+    let statsUpdateTimer = null;
     
     // Показать ошибку
     function showError(message) {
@@ -489,6 +502,32 @@
                 <button class="retry-button" onclick="retryConnection()">Повторить подключение</button>
             </div>
         `;
+    }
+
+    // Функция для загрузки и обновления статистики
+    function updateStatsData() {
+        console.log('🔄 Обновление данных статистики...');
+        
+        fetch('http://localhost:8000/api/stats')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ошибка: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    updateStats(data.data);
+                    updateLastUpdateTime();
+                    console.log('✅ Статистика обновлена');
+                } else {
+                    console.error('❌ Ошибка в данных статистики:', data);
+                }
+            })
+            .catch(err => {
+                console.error('❌ Ошибка загрузки статистики:', err);
+                // Не показываем ошибку пользователю, просто логируем
+            });
     }
 
     // Рендеринг одной попытки
@@ -571,6 +610,7 @@
         
         ws = new WebSocket('ws://localhost:8000/ws/monitor');
         
+        // В функции connectWebSocket, после успешного подключения:
         ws.onopen = () => {
             console.log('✅ WebSocket подключен');
             updateConnectionStatus(true);
@@ -582,6 +622,7 @@
             }
             
             startPing();
+            startStatsAutoUpdate(); // Запускаем автообновление статистики
         };
         
         ws.onmessage = (event) => {
@@ -648,7 +689,7 @@
         }
     }
     
-    // Обработка сообщений WebSocket
+    // В функции handleWebSocketMessage добавляем обработку stats_update
     function handleWebSocketMessage(data) {
         switch(data.type) {
             case 'init':
@@ -665,35 +706,105 @@
                 addLiveAttempt(data.data);
                 updateStatsFromAttempt(data.data);
                 scheduleChartUpdate();
+                // При новой попытке обновляем статистику
+                setTimeout(updateStatsData, 1000);
                 break;
                 
             case 'stats_update':
+                console.log('📊 Обновление статистики через WebSocket');
                 updateStats(data.data);
+                updateLastUpdateTime();
+                break;
+                
+            case 'pong':
+                console.log('🏓 Получен pong от сервера');
+                break;
+                
+            case 'keep_alive':
+                console.log('💓 Keep-alive от сервера');
                 break;
         }
     }
     
-    // Обновление статистики
     function updateStats(stats) {
         console.log('📊 Обновление статистики:', stats);
         
+        // Основная статистика
         document.getElementById('totalAttempts').textContent = stats.total_attempts || 0;
         document.getElementById('successfulAttempts').textContent = stats.successful || 0;
         document.getElementById('failedAttempts').textContent = stats.failed || 0;
         document.getElementById('uniqueUsers').textContent = stats.unique_users || 0;
         document.getElementById('uniqueIPs').textContent = stats.unique_ips || 0;
+        
+        // Временная статистика
         document.getElementById('lastHourAttempts').textContent = stats.last_hour || 0;
+        document.getElementById('last10MinAttempts').textContent = stats.last_10_min || 0;
+        
+        // Добавляем анимацию при изменении значений
+        animateStatChange('lastHourAttempts', stats.last_hour || 0);
+        animateStatChange('last10MinAttempts', stats.last_10_min || 0);
+    }
+
+    // Анимация изменения значения
+    function animateStatChange(elementId, newValue) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        
+        const oldValue = parseInt(element.textContent) || 0;
+        if (newValue !== oldValue && newValue > oldValue) {
+            // Если значение увеличилось, добавляем анимацию
+            element.style.color = '#4ade80'; // Зеленый цвет
+            element.style.transition = 'color 0.5s';
+            
+            // Возвращаем исходный цвет через 1 секунду
+            setTimeout(() => {
+                element.style.color = '#4cc9f0';
+            }, 1000);
+            
+            console.log(`📈 Статистика изменилась: ${elementId}: ${oldValue} → ${newValue}`);
+        }
+    }
+
+        // Начинаем периодическое обновление статистики
+    function startStatsAutoUpdate() {
+        if (statsUpdateTimer) {
+            clearInterval(statsUpdateTimer);
+        }
+        
+        // Обновляем статистику каждые 30 секунд
+        statsUpdateTimer = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                // Если WebSocket подключен, запрашиваем обновление через него
+                try {
+                    ws.send('get_stats');
+                } catch (e) {
+                    console.log('❌ Ошибка запроса статистики через WS:', e);
+                    updateStatsData(); // Fallback: обновляем через HTTP
+                }
+            } else {
+                // Если WebSocket не подключен, обновляем через HTTP
+                updateStatsData();
+            }
+        }, 30000); // 30 секунд
+        
+        console.log('🔄 Автообновление статистики запущено (каждые 30 секунд)');
     }
     
-    // Обновление статистики после попытки
+    // В функции updateStatsFromAttempt добавляем обновление счетчика за последний час
     function updateStatsFromAttempt(attempt) {
         const totalEl = document.getElementById('totalAttempts');
         const successEl = document.getElementById('successfulAttempts');
         const failedEl = document.getElementById('failedAttempts');
+        const lastHourEl = document.getElementById('lastHourAttempts');
         
         if (totalEl) {
             let total = parseInt(totalEl.textContent) || 0;
             totalEl.textContent = total + 1;
+        }
+        
+        if (lastHourEl) {
+            let lastHour = parseInt(lastHourEl.textContent) || 0;
+            lastHourEl.textContent = lastHour + 1;
         }
         
         if (attempt && attempt.success) {
@@ -947,22 +1058,12 @@
         updateChart(emptyData);
     }
     
-    // Загрузка начальных данных
+    // В функции loadInitialData заменяем старый код на:
     function loadInitialData() {
         console.log('📥 Загрузка начальных данных...');
         
-        // Статистика
-        fetch('http://localhost:8000/api/stats')
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    updateStats(data.data);
-                }
-            })
-            .catch(err => {
-                console.error('❌ Ошибка загрузки статистики:', err);
-                showError('Не удалось загрузить статистику');
-            });
+        // Загружаем статистику
+        updateStatsData();
         
         // Последние попытки
         fetch('http://localhost:8000/api/attempts?limit=20')
