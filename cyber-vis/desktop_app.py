@@ -1,44 +1,39 @@
 import sys
 import requests
 import threading
-from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtWidgets, QtCore, QtGui
+from loginui import Ui_MainWindow
 
-class SimpleAuthSender(QtWidgets.QMainWindow):
+
+class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
         super().__init__()
+        self.setupUi(self)
         
-        widget = QtWidgets.QWidget()
-        self.setCentralWidget(widget)
-        layout = QtWidgets.QVBoxLayout(widget)
+        # Настройка полей ввода
+        self.lineEdit.setText("ilya")  # Логин
+        self.lineEdit_2.setText("1111")  # Пароль
+        self.lineEdit_2.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         
-        # Поля ввода
-        self.login = QtWidgets.QLineEdit("ilya")
-        self.password = QtWidgets.QLineEdit("1111")
-        self.password.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
+        # Настройка кнопок
+        self.pushButton.clicked.connect(self.send_data_in_thread)  # Кнопка "Войти"
+        self.pushButton_2.clicked.connect(self.close)  # Кнопка "Выйти"
         
-        # Кнопка
-        self.btn = QtWidgets.QPushButton("Отправить")
-        self.btn.clicked.connect(self.send_data_in_thread)
-        
-        # Статус
-        self.status = QtWidgets.QLabel("Готов к отправке")
-        
-        # Сборка
-        layout.addWidget(QtWidgets.QLabel("Логин:"))
-        layout.addWidget(self.login)
-        layout.addWidget(QtWidgets.QLabel("Пароль:"))
-        layout.addWidget(self.password)
-        layout.addWidget(self.btn)
-        layout.addWidget(self.status)
+        # Создаем статусный лейбл
+        self.statusLabel = QtWidgets.QLabel("Готов к отправке", parent=self.centralwidget)
+        self.statusLabel.setGeometry(QtCore.QRect(170, 530, 471, 30))
+        self.statusLabel.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         
         self.setWindowTitle("Auth Sender")
-        self.setFixedSize(250, 200)
+        
+        # Блокируем изменение размера окна
+        self.setFixedSize(self.size())
     
     def send_data_in_thread(self):
         """Запуск отправки в отдельном потоке"""
-        self.btn.setEnabled(False)
-        self.btn.setText("...")
-        self.status.setText("Отправка...")
+        self.pushButton.setEnabled(False)
+        self.pushButton.setText("...")
+        self.statusLabel.setText("Отправка...")
         
         # Запускаем в отдельном потоке
         thread = threading.Thread(target=self.send_data_thread)
@@ -51,8 +46,8 @@ class SimpleAuthSender(QtWidgets.QMainWindow):
             response = requests.post(
                 "http://localhost:8000/api/auth/login",
                 json={
-                    "username": self.login.text(),
-                    "password": self.password.text(),
+                    "username": self.lineEdit.text(),
+                    "password": self.lineEdit_2.text(),
                     "client_type": "desktop"
                 },
                 timeout=3
@@ -81,11 +76,11 @@ class SimpleAuthSender(QtWidgets.QMainWindow):
     def update_ui_after_send(self, success):
         """Обновить UI после успешной отправки"""
         if success:
-            self.status.setText("✅ Отправлено")
-            self.btn.setText("✅")
+            self.statusLabel.setText("✅ Авторизация успешна")
+            self.pushButton.setText("✅")
         else:
-            self.status.setText("❌ Ошибка авторизации")
-            self.btn.setText("❌")
+            self.statusLabel.setText("❌ Ошибка авторизации")
+            self.pushButton.setText("❌")
         
         # Восстанавливаем через 2 секунды
         QtCore.QTimer.singleShot(2000, self.reset_ui)
@@ -93,15 +88,16 @@ class SimpleAuthSender(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(str)
     def update_ui_error(self, error_msg):
         """Обновить UI при ошибке"""
-        self.status.setText(f"❌ Ошибка: {error_msg[:30]}")
-        self.btn.setText("❌")
+        self.statusLabel.setText(f"❌ Ошибка: {error_msg[:30]}")
+        self.pushButton.setText("❌")
         QtCore.QTimer.singleShot(2000, self.reset_ui)
     
     def reset_ui(self):
         """Вернуть UI в исходное состояние"""
-        self.btn.setEnabled(True)
-        self.btn.setText("Отправить")
-        self.status.setText("Готов к отправке")
+        self.pushButton.setEnabled(True)
+        self.pushButton.setText("Войти")
+        self.statusLabel.setText("Готов к отправке")
+
 
 if __name__ == "__main__":
     # Добавляем обработку Ctrl+C для Poetry

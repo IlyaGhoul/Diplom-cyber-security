@@ -166,72 +166,45 @@ async def get_attempts(limit: int = 100):
         "timestamp": datetime.now().isoformat()
     }
 
-@app.get("/api/attempts_for_chart")
-async def get_attempts_for_chart(hours: int = 6):
-    """Получить данные для графика за последние N часов"""
+@app.get("/api/chart_data")
+async def get_chart_data():
+    """Получить данные для графика - только успешные и неудачные попытки"""
     cursor = db.conn.cursor()
     
-    # Получаем попытки за последние N часов
-    cursor.execute('''
-        SELECT * FROM login_attempts 
-        WHERE datetime(attempt_time) > datetime('now', ?)
-        ORDER BY attempt_time ASC
-    ''', (f'-{hours} hours',))
-    
-    columns = [desc[0] for desc in cursor.description]
-    attempts = []
-    for row in cursor.fetchall():
-        attempt = dict(zip(columns, row))
-        attempt['success'] = bool(attempt['success'])
-        attempts.append(attempt)
-    
-    # Создаем данные для графика по часам
-    chart_data = {
-        "labels": [],
-        "successful": [],
-        "failed": []
-    }
-    
-    # Генерируем метки для каждого часа
-    now = datetime.now()
-    
-    for i in range(hours):
-        hour_start = now - timedelta(hours=hours - i - 1)
-        hour_end = hour_start + timedelta(hours=1)
+    try:
+        # Получаем общее количество успешных и неудачных попыток
+        cursor.execute('''
+            SELECT 
+                COUNT(CASE WHEN success = 1 THEN 1 END) as successful,
+                COUNT(CASE WHEN success = 0 THEN 1 END) as failed
+            FROM login_attempts
+        ''')
         
-        # Форматируем метку
-        label = hour_start.strftime("%H:00")
-        chart_data["labels"].append(label)
+        row = cursor.fetchone()
+        successful = row[0] or 0
+        failed = row[1] or 0
         
-        # Считаем попытки за этот час
-        successful = 0
-        failed = 0
+        chart_data = {
+            "total": {
+                "successful": successful,
+                "failed": failed,
+                "total": successful + failed
+            }
+        }
         
-        for attempt in attempts:
-            attempt_time_str = attempt['attempt_time']
-            if isinstance(attempt_time_str, str):
-                if 'Z' in attempt_time_str:
-                    attempt_time_str = attempt_time_str.replace('Z', '+00:00')
-                attempt_time = datetime.fromisoformat(attempt_time_str)
-            else:
-                # Если это уже datetime объект
-                attempt_time = attempt_time_str
-                
-            if hour_start <= attempt_time < hour_end:
-                if attempt['success']:
-                    successful += 1
-                else:
-                    failed += 1
+        return {
+            "success": True,
+            "data": chart_data,
+            "timestamp": datetime.now().isoformat()
+        }
         
-        chart_data["successful"].append(successful)
-        chart_data["failed"].append(failed)
-    
-    return {
-        "success": True,
-        "data": chart_data,
-        "total_attempts": len(attempts),
-        "timestamp": datetime.now().isoformat()
-    }
+    except Exception as e:
+        print(f"❌ Ошибка получения данных графика: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 @app.websocket("/ws/monitor")
 async def websocket_monitor(websocket: WebSocket):
@@ -244,7 +217,14 @@ async def websocket_monitor(websocket: WebSocket):
             "type": "init",
             "data": {
                 "stats": db.get_stats(),
-                "recent_attempts": db.get_recent_attempts(20)
+                "recent_attempts": db.get_recent_attempts(20),
+                "chart_data": {
+                    "total": {
+                        "successful": db.get_stats()["successful"],
+                        "failed": db.get_stats()["failed"],
+                        "total": db.get_stats()["total_attempts"]
+                    }
+                }
             },
             "timestamp": datetime.now().isoformat()
         }, websocket)
@@ -296,7 +276,7 @@ async def root():
             "login": "POST /api/auth/login",
             "stats": "GET /api/stats",
             "attempts": "GET /api/attempts",
-            "chart_data": "GET /api/attempts_for_chart?hours=6",
+            "chart_data": "GET /api/chart_data",
             "websocket": "WS /ws/monitor"
         },
         "demo_users": list(USERS.keys())
