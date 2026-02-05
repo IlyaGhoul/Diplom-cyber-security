@@ -904,6 +904,7 @@
                 <div>
                     <span>${attempt.client_type || ''}</span>
                     <span style="margin-left:12px;color:#888;">IP: ${attempt.ip_address || (attempt.client_info && attempt.client_info.ip_address) || '---'}</span>
+                    <span style="margin-left:12px;color:#999;">🌍 ${attempt.country || 'Неизвестно'}</span>
                 </div>
             </div>
         `;

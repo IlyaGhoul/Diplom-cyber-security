@@ -18,6 +18,7 @@ class LoginDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
                     ip_address TEXT,
+                    country TEXT,
                     client_type TEXT,
                     success BOOLEAN NOT NULL,
                     reason TEXT,
@@ -27,18 +28,27 @@ class LoginDatabase:
                 )
             ''')
             conn.commit()
+            
+            # Добавляем поле country к существующей таблице (если его еще нет)
+            try:
+                cursor.execute('ALTER TABLE login_attempts ADD COLUMN country TEXT')
+                conn.commit()
+            except sqlite3.OperationalError:
+                # Поле уже существует
+                pass
     
-    def add_attempt(self, username, ip_address, client_type, success, reason="", user_agent="", metadata=None):
+    def add_attempt(self, username, ip_address, client_type, success, reason="", user_agent="", metadata=None, country=None):
         """Добавить попытку входа"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO login_attempts 
-                (username, ip_address, client_type, success, reason, user_agent, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                (username, ip_address, country, client_type, success, reason, user_agent, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 username,
                 ip_address,
+                country,
                 client_type,
                 success,
                 reason,

@@ -11,6 +11,7 @@ from datetime import datetime
 import uvicorn
 import asyncio
 import sqlite3
+import requests
 
 from database import db
 
@@ -59,6 +60,25 @@ def get_client_ip(request: Request) -> str:
         return request.client.host
     
     return "127.0.0.1"  # fallback
+
+# Функция для получения страны по IP
+def get_country_by_ip(ip_address: str) -> str:
+    """Получить страну по IP-адресу"""
+    if not ip_address or ip_address == "127.0.0.1" or ip_address == "::1":
+        return "Локальное"
+    
+    try:
+        # Используем ipwhois.app API (бесплатно, без ключа)
+        response = requests.get(f'https://ipwhois.app/json/{ip_address}', timeout=2)
+        if response.ok:
+            data = response.json()
+            country = data.get('country')
+            if country:
+                return country
+    except Exception as e:
+        print(f"⚠️  Ошибка определения страны для IP {ip_address}: {e}")
+    
+    return "Неизвестно"
 
 # Хеш паролей
 def hash_password(password: str) -> str:
@@ -155,6 +175,7 @@ async def login(request: LoginRequest, http_request: Request):
         success=is_valid,
         reason=reason,
         user_agent=request.user_agent,
+        country=get_country_by_ip(client_ip),  # Определяем страну
         metadata={
             "timestamp": datetime.now().isoformat(),
             "client_info": {
