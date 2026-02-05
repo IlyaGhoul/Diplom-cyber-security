@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class LoginDatabase:
     """База данных для хранения попыток входа"""
@@ -36,6 +36,19 @@ class LoginDatabase:
             except sqlite3.OperationalError:
                 # Поле уже существует
                 pass
+            
+            # Таблица заблокированных IP адресов
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS ip_blocks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ip_address TEXT UNIQUE NOT NULL,
+                    reason TEXT,
+                    blocked_until TIMESTAMP,
+                    is_permanent BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            conn.commit()
     
     def add_attempt(self, username, ip_address, client_type, success, reason="", user_agent="", metadata=None, country=None):
         """Добавить попытку входа"""
@@ -50,7 +63,7 @@ class LoginDatabase:
                 ip_address,
                 country,
                 client_type,
-                success,
+                int(success),  # Явно конвертируем bool в int для SQLite
                 reason,
                 user_agent,
                 json.dumps(metadata) if metadata else None
@@ -126,6 +139,92 @@ class LoginDatabase:
                 'last_10_min': last_10_min,
                 'timestamp': datetime.now().isoformat()  # Добавляем метку времени
             }
+    
+    def get_failed_attempts_count(self, ip_address: str, minutes: int = 15) -> int:
+        """Получить количество неудачных попыток за последние N минут"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            time_threshold = datetime.now() - timedelta(minutes=minutes)
+            cursor.execute('''
+                SELECT COUNT(*) FROM login_attempts 
+                WHERE ip_address = ? AND success = 0 AND attempt_time > ?
+            ''', (ip_address, time_threshold.isoformat()))
+            result = cursor.fetchone()
+            return result[0] if result else 0
+    
+    def add_ip_block(self, ip_address: str, reason: str, duration_minutes: int = None, is_permanent: bool = False) -> bool:
+        """Добавить IP в блокировку"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            blocked_until = None
+            if not is_permanent and duration_minutes:
+                blocked_until = (datetime.now() + timedelta(minutes=duration_minutes)).isoformat()
+            
+            try:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO ip_blocks 
+                    (ip_address, reason, blocked_until, is_permanent)
+                    VALUES (?, ?, ?, ?)
+                ''', (ip_address, reason, blocked_until, is_permanent))
+                conn.commit()
+                return True
+            except Exception as e:
+                print(f"❌ Ошибка добавления блокировки IP: {e}")
+                return False
+    
+    def is_ip_blocked(self, ip_address: str) -> tuple:
+        """Проверить, заблокирован ли IP. Возвращает (is_blocked, reason)"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT reason, blocked_until, is_permanent FROM ip_blocks 
+                WHERE ip_address = ?
+            ''', (ip_address,))
+            result = cursor.fetchone()
+            
+            if not result:
+                return False, None
+            
+            reason, blocked_until, is_permanent = result
+            
+            # Если постоянная блокировка
+            if is_permanent:
+                return True, f"🚫 Постоянная блокировка: {reason}"
+            
+            # Если временная блокировка
+            if blocked_until:
+                blocked_until_dt = datetime.fromisoformat(blocked_until)
+                if datetime.now() < blocked_until_dt:
+                    remaining = blocked_until_dt - datetime.now()
+                    minutes = int(remaining.total_seconds() / 60)
+                    return True, f"⏱️ IP заблокирован на {minutes} мин: {reason}"
+                else:
+                    # Истекла временная блокировка, удаляем
+                    cursor.execute('DELETE FROM ip_blocks WHERE ip_address = ?', (ip_address,))
+                    conn.commit()
+                    return False, None
+            
+            return False, None
+    
+    def get_blocked_ips(self) -> list:
+        """Получить список всех заблокированных IP"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # Сначала удаляем истёкшие временные блокировки
+            cursor.execute('''
+                DELETE FROM ip_blocks 
+                WHERE is_permanent = 0 AND blocked_until < ?
+            ''', (datetime.now().isoformat(),))
+            conn.commit()
+            
+            # Получаем оставшиеся блокировки
+            cursor.execute('''
+                SELECT * FROM ip_blocks ORDER BY created_at DESC
+            ''')
+            return [dict(row) for row in cursor.fetchall()]
 
 # Глобальный экземпляр БД
 db = LoginDatabase()

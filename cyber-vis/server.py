@@ -133,6 +133,15 @@ async def login(request: LoginRequest, http_request: Request):
     # Предпочитаем IP, присланный клиентом (если есть), иначе определяем серверно
     client_ip = request.ip_address or get_client_ip(http_request)
     
+    # НОВОЕ: Проверяем, заблокирован ли IP
+    is_blocked, block_reason = db.is_ip_blocked(client_ip)
+    if is_blocked:
+        print(f"🚫 Попытка входа с заблокированного IP: {client_ip} - {block_reason}")
+        return LoginResponse(
+            success=False,
+            message=block_reason
+        )
+    
     print(f"🔍 Попытка входа:")
     print(f"   Пользователь: {request.username}")
     print(f"   IP-адрес: {client_ip}")
@@ -167,7 +176,7 @@ async def login(request: LoginRequest, http_request: Request):
             print(f"   ❌ Пользователь не найден")
         message = "Неверный логин или пароль"
     
-    # Сохраняем попытку в БД
+    # Сохраняем попытку в БД ПЕРЕД проверкой блокировки
     attempt_id = db.add_attempt(
         username=request.username,
         ip_address=client_ip,  # Используем реальный IP
@@ -187,6 +196,46 @@ async def login(request: LoginRequest, http_request: Request):
     )
     
     print(f"   Попытка сохранена с ID: {attempt_id}")
+    
+    # НОВОЕ: Если ошибка - считаем попытки (теперь включая текущую) и автоматически блокируем
+    if not is_valid:
+        failed_count_15min = db.get_failed_attempts_count(client_ip, minutes=15)
+        failed_count_60min = db.get_failed_attempts_count(client_ip, minutes=60)
+        
+        print(f"   ⚠️  Неудачных попыток за 15 мин: {failed_count_15min}, за 60 мин: {failed_count_60min}")
+        print(f"   📊 Проверка блокировки: success={is_valid}, reason={reason}")
+        
+        # Правило 1: 3 ошибки за 15 минут = 10 минут блокировки
+        if failed_count_15min >= 3:
+            db.add_ip_block(client_ip, reason="Слишком много неудачных попыток (3+ за 15 мин)", 
+                          duration_minutes=10, is_permanent=False)
+            print(f"   🚫 IP {client_ip} заблокирован на 10 минут (правило 1)")
+            # Отправляем событие о блокировке
+            await manager.broadcast({
+                "type": "ip_blocked",
+                "data": {"ip_address": client_ip, "reason": "3+ ошибки за 15 минут"},
+                "timestamp": datetime.now().isoformat()
+            })
+            return LoginResponse(
+                success=False,
+                message="⏱️ IP заблокирован на 10 минут из-за частых ошибок. Попробуйте позже."
+            )
+        
+        # Правило 2: 10 ошибок за 60 минут = 24 часа блокировки
+        if failed_count_60min >= 10:
+            db.add_ip_block(client_ip, reason="Слишком много неудачных попыток (10+ за час)", 
+                          duration_minutes=24*60, is_permanent=False)
+            print(f"   🚫 IP {client_ip} заблокирован на 24 часа (правило 2)")
+            # Отправляем событие о блокировке
+            await manager.broadcast({
+                "type": "ip_blocked",
+                "data": {"ip_address": client_ip, "reason": "10+ ошибок за час"},
+                "timestamp": datetime.now().isoformat()
+            })
+            return LoginResponse(
+                success=False,
+                message="⏱️ IP заблокирован на 24 часа из-за многочисленных ошибок."
+            )
     
     # Получаем полные данные о попытке
     with sqlite3.connect(db.db_path) as conn:
@@ -230,6 +279,18 @@ async def get_attempts(limit: int = 100):
         "success": True,
         "data": attempts,
         "count": len(attempts),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/blocked-ips")
+async def get_blocked_ips():
+    """Получить список заблокированных IP адресов"""
+    blocked_ips = db.get_blocked_ips()
+    
+    return {
+        "success": True,
+        "data": blocked_ips,
+        "count": len(blocked_ips),
         "timestamp": datetime.now().isoformat()
     }
 

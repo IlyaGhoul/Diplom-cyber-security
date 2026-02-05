@@ -472,6 +472,16 @@
                     <div class="empty-state">Ожидание новых попыток...</div>
                 </div>
             </div>
+            
+            <div class="attempts-panel">
+                <div class="panel-header">
+                    <div class="panel-title">🚫 Заблокированные IP</div>
+                    <div class="panel-count" id="blockedIpsCount">0</div>
+                </div>
+                <div class="attempts-list" id="blockedIpsList">
+                    <div class="empty-state">Нет заблокированных IP</div>
+                </div>
+            </div>
         </div>
         
         <div class="last-update" id="lastUpdate">
@@ -489,6 +499,7 @@
     let liveAttempts = [];
     let recentAttempts = [];
     let statsUpdateTimer = null;
+    let blockedIps = [];
     
     // Показать ошибку
     function showError(message) {
@@ -1079,10 +1090,88 @@
                 console.error('❌ Ошибка загрузки попыток:', err);
             });
         
+        // Загружаем заблокированные IP
+        fetch('http://localhost:8000/api/blocked-ips')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateBlockedIps(data.data);
+                }
+            })
+            .catch(err => {
+                console.error('❌ Ошибка загрузки заблокированных IP:', err);
+            });
+        
         // Данные графика
         updateChartData();
         
         updateLastUpdateTime();
+    }
+    
+    // Обновление списка заблокированных IP
+    function updateBlockedIps(ips) {
+        if (!ips || !Array.isArray(ips)) return;
+        
+        blockedIps = ips;
+        renderBlockedIps();
+    }
+    
+    // Отображение заблокированных IP
+    function renderBlockedIps() {
+        const list = document.getElementById('blockedIpsList');
+        const count = document.getElementById('blockedIpsCount');
+        
+        if (!list) return;
+        
+        count.textContent = blockedIps.length;
+        
+        if (blockedIps.length === 0) {
+            list.innerHTML = '<div class="empty-state">Нет заблокированных IP</div>';
+            return;
+        }
+        
+        list.innerHTML = '';
+        blockedIps.forEach(block => {
+            renderBlockedIpItem(block, list);
+        });
+    }
+    
+    // Рендеринг одного заблокированного IP
+    function renderBlockedIpItem(block, container) {
+        const blockEl = document.createElement('div');
+        blockEl.className = 'attempt-item failed';
+        blockEl.style.animation = 'slideIn 0.3s ease';
+        
+        const createdAt = new Date(block.created_at);
+        const timeStr = createdAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const dateStr = createdAt.toLocaleDateString();
+        
+        let blockStatus = '🚫 Постоянно заблокирован';
+        if (block.blocked_until && !block.is_permanent) {
+            const blockedUntil = new Date(block.blocked_until);
+            const remaining = blockedUntil - new Date();
+            if (remaining > 0) {
+                const minutes = Math.ceil(remaining / 60000);
+                blockStatus = `⏱️ Заблокирован на ${minutes} мин`;
+            }
+        }
+        
+        blockEl.innerHTML = `
+            <div class="attempt-header">
+                <div class="attempt-username">IP: ${block.ip_address}</div>
+                <div class="attempt-time">${dateStr} ${timeStr}</div>
+            </div>
+            <div class="attempt-info">
+                <div>
+                    <span class="attempt-badge badge-failed">${blockStatus}</span>
+                </div>
+                <div style="margin-top: 8px; font-size: 0.9em; color: #aaa;">
+                    ${block.reason || 'Причина не указана'}
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(blockEl);
     }
     
     // Инициализация
