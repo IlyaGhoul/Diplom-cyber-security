@@ -721,6 +721,22 @@
                 setTimeout(updateStatsData, 1000);
                 break;
                 
+            case 'ip_blocked':
+                console.log('🚫 IP заблокирован:', data.data);
+                // Обновляем список заблокированных IP
+                setTimeout(() => {
+                    fetch('http://localhost:8000/api/blocked-ips')
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                updateBlockedIps(data.data);
+                                console.log('✅ Список заблокированных IP обновлен');
+                            }
+                        })
+                        .catch(err => console.error('❌ Ошибка обновления блокировок:', err));
+                }, 100);
+                break;
+                
             case 'stats_update':
                 console.log('📊 Обновление статистики через WebSocket');
                 updateStats(data.data);

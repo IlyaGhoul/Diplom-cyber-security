@@ -54,10 +54,12 @@ class LoginDatabase:
         """Добавить попытку входа"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            # Явно передаём текущее время вместо DEFAULT CURRENT_TIMESTAMP
+            current_time = datetime.now().isoformat()
             cursor.execute('''
                 INSERT INTO login_attempts 
-                (username, ip_address, country, client_type, success, reason, user_agent, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (username, ip_address, country, client_type, success, reason, user_agent, metadata, attempt_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 username,
                 ip_address,
@@ -66,7 +68,8 @@ class LoginDatabase:
                 int(success),  # Явно конвертируем bool в int для SQLite
                 reason,
                 user_agent,
-                json.dumps(metadata) if metadata else None
+                json.dumps(metadata) if metadata else None,
+                current_time
             ))
             conn.commit()
             return cursor.lastrowid
@@ -145,12 +148,29 @@ class LoginDatabase:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             time_threshold = datetime.now() - timedelta(minutes=minutes)
+            time_threshold_iso = time_threshold.isoformat()
+            
+            # DEBUG: Проверяем, что вообще есть в БД
+            cursor.execute('SELECT COUNT(*) FROM login_attempts WHERE ip_address = ?', (ip_address,))
+            total_for_ip = cursor.fetchone()[0]
+            
+            # DEBUG: Проверяем значения success
+            cursor.execute('SELECT success, COUNT(*) FROM login_attempts WHERE ip_address = ? GROUP BY success', (ip_address,))
+            success_stats = cursor.fetchall()
+            
+            print(f"   🔍 DEBUG get_failed_attempts: IP={ip_address}, всего попыток={total_for_ip}, статусы={success_stats}")
+            
+            # Исправленный запрос - используем >= для строкового сравнения ISO format
             cursor.execute('''
                 SELECT COUNT(*) FROM login_attempts 
-                WHERE ip_address = ? AND success = 0 AND attempt_time > ?
-            ''', (ip_address, time_threshold.isoformat()))
+                WHERE ip_address = ? AND success = 0 AND attempt_time >= ?
+            ''', (ip_address, time_threshold_iso))
             result = cursor.fetchone()
-            return result[0] if result else 0
+            count = result[0] if result else 0
+            
+            print(f"   🔍 DEBUG: Неудачных за {minutes} мин: {count}, порог времени: {time_threshold_iso}")
+            
+            return count
     
     def add_ip_block(self, ip_address: str, reason: str, duration_minutes: int = None, is_permanent: bool = False) -> bool:
         """Добавить IP в блокировку"""
