@@ -2,6 +2,7 @@ import sys
 import requests
 import threading
 import logging
+import socket
 from PyQt6 import QtWidgets, QtCore, QtGui
 from loginui import Ui_MainWindow
 
@@ -66,12 +67,35 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             logger.info(f"Начинаю отправку данных на сервер")
             logger.debug(f"Данные для отправки: username={username}, password={'*' * len(password)}")
             
-            # Создаем JSON данные с User-Agent
+            # Попробуем определить IP устройства: сначала публичный через ipify, иначе локальный outbound
+            ip_address = None
+            try:
+                resp = requests.get('https://api.ipify.org?format=json', timeout=2)
+                if resp.ok:
+                    ip_address = resp.json().get('ip')
+            except Exception:
+                ip_address = None
+
+            if not ip_address:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.connect(('8.8.8.8', 80))
+                    ip_address = s.getsockname()[0]
+                except Exception:
+                    ip_address = '127.0.0.1'
+                finally:
+                    try:
+                        s.close()
+                    except Exception:
+                        pass
+
+            # Создаем JSON данные с User-Agent и ip устройства
             json_data = {
                 "username": username,
                 "password": password,
                 "client_type": "desktop",
-                "user_agent": "PyQt-Auth-Client/1.0"
+                "user_agent": "PyQt-Auth-Client/1.0",
+                "ip_address": ip_address
             }
             
             logger.debug(f"JSON данные: {json_data}")

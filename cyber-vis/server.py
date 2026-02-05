@@ -31,6 +31,7 @@ class LoginRequest(BaseModel):
     password: str
     client_type: str = "desktop"
     user_agent: Optional[str] = "unknown"
+    ip_address: Optional[str] = None  # optional client-supplied IP (preferred if present)
 
 # Модель ответа
 class LoginResponse(BaseModel):
@@ -109,8 +110,8 @@ manager = ConnectionManager()
 @app.post("/api/auth/login", response_model=LoginResponse)
 async def login(request: LoginRequest, http_request: Request):
     """Обработка попытки входа"""
-    # Получаем реальный IP-адрес
-    client_ip = get_client_ip(http_request)
+    # Предпочитаем IP, присланный клиентом (если есть), иначе определяем серверно
+    client_ip = request.ip_address or get_client_ip(http_request)
     
     print(f"🔍 Попытка входа:")
     print(f"   Пользователь: {request.username}")
