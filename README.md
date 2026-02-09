@@ -32,3 +32,32 @@ poetry run uvicorn website_server:app --host 0.0.0.0 --port 8080
 
 #  3. Запускаем Python приложение (авторизация)
 poetry run python desktop_app.py
+## 📊 База данных
+
+### Миграция на PostgreSQL (Production)
+
+Проект использует **PostgreSQL** для сохранения данных между перезагрузками на Render.
+
+**Для локальной разработки:**
+
+```bash
+# Задайте переменную окружения (Linux/macOS):
+export DATABASE_URL="postgresql://user:password@localhost:5432/login_monitor"
+
+# или на Windows (PowerShell):
+$env:DATABASE_URL = "postgresql://user:password@localhost:5432/login_monitor"
+
+# Установите зависимости
+pip install -r requirements.txt
+
+# Запустите сервер
+python -m uvicorn server:app --reload
+```
+
+**Для Render (Production):**
+
+1. Создайте PostgreSQL базу в [render.com](https://render.com)
+2. Скопируйте `DATABASE_URL` из настроек Render
+3. В настройках сервиса добавьте переменную окружения: `DATABASE_URL`
+
+📖 **Подробнее:** см. [POSTGRES_SETUP.md](./POSTGRES_SETUP.md)
