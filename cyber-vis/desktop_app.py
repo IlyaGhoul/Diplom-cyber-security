@@ -99,7 +99,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             }
             
             logger.debug(f"JSON данные: {json_data}")
-            logger.debug(f"URL: http://localhost:8000/api/auth/login")
+            logger.debug(f"URL: https://diplom-cyber-security.onrender.com/api/auth/login")
             
             # Отправляем с заголовками
             headers = {
@@ -108,7 +108,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             }
             
             response = requests.post(
-                "http://localhost:8000/api/auth/login",
+                "https://diplom-cyber-security.onrender.com/api/auth/login",
                 json=json_data,
                 headers=headers,
                 timeout=3
