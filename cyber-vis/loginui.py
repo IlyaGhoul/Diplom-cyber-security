@@ -75,3 +75,4 @@ class Ui_MainWindow(object):
         self.label_2.setText(_translate("MainWindow", "Логин"))
         self.label_3.setText(_translate("MainWindow", "Пароль"))
         self.pushButton_2.setText(_translate("MainWindow", "Выйти"))
+        

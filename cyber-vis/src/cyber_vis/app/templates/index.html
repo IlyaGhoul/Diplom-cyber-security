@@ -89,14 +89,22 @@
     </div>
 
     <script>
+        // Конфигурация подключения (можно переопределить перед загрузкой скрипта):
+        // window.CYBER_VIS_API_BASE = 'https://your-server.com';
+        // window.CYBER_VIS_WS_URL = 'wss://your-server.com/ws/monitor';
+
         // WebSocket подключение
         let ws = null;
         let loginChart = null;
         let activityChart = null;
+        // Определяем базовые URL: сначала используем глобальные переменные (если заданы),
+        // иначе по-умолчанию используем текущий хост и протокол страницы.
+        const API_BASE = (typeof CYBER_VIS_API_BASE !== 'undefined') ? CYBER_VIS_API_BASE : (location.protocol + '//' + location.host);
+        const WS_URL = (typeof CYBER_VIS_WS_URL !== 'undefined') ? CYBER_VIS_WS_URL : ((location.protocol === 'https:') ? 'wss://' + location.host + '/ws/monitor' : 'ws://' + location.host + '/ws/monitor');
         
         // Подключение к WebSocket
         function connectWebSocket() {
-            ws = new WebSocket('ws://localhost:8000/ws/monitor');
+            ws = new WebSocket(WS_URL);
             
             ws.onopen = () => {
                 document.getElementById('wsStatus').innerHTML = '🟢 Подключено';

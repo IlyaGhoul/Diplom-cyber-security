@@ -500,6 +500,11 @@
     let recentAttempts = [];
     let statsUpdateTimer = null;
     let blockedIps = [];
+    // Конфигурация подключения (можно задать глобально перед загрузкой страницы):
+    // window.CYBER_VIS_API_BASE = 'https://your-server.com';
+    // window.CYBER_VIS_WS_URL = 'wss://your-server.com/ws/monitor';
+    const API_BASE = (typeof CYBER_VIS_API_BASE !== 'undefined') ? CYBER_VIS_API_BASE : (location.protocol + '//' + location.host);
+    const WS_URL = (typeof CYBER_VIS_WS_URL !== 'undefined') ? CYBER_VIS_WS_URL : ((location.protocol === 'https:') ? 'wss://' + location.host + '/ws/monitor' : 'ws://' + location.host + '/ws/monitor');
     
     // Показать ошибку
     function showError(message) {
@@ -519,7 +524,7 @@
     function updateStatsData() {
         console.log('🔄 Обновление данных статистики...');
         
-        fetch('http://localhost:8000/api/stats')
+        fetch(API_BASE + '/api/stats')
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`HTTP ошибка: ${response.status}`);
@@ -619,7 +624,7 @@
             ws.close();
         }
         
-        ws = new WebSocket('ws://localhost:8000/ws/monitor');
+        ws = new WebSocket(WS_URL);
         
         // В функции connectWebSocket, после успешного подключения:
         ws.onopen = () => {
@@ -724,8 +729,8 @@
             case 'ip_blocked':
                 console.log('🚫 IP заблокирован:', data.data);
                 // Обновляем список заблокированных IP
-                setTimeout(() => {
-                    fetch('http://localhost:8000/api/blocked-ips')
+                    setTimeout(() => {
+                    fetch(API_BASE + '/api/blocked-ips')
                         .then(response => response.json())
                         .then(data => {
                             if (data.success) {
@@ -954,7 +959,7 @@
     function updateChartData() {
         console.log('📈 Обновляю данные графика...');
         
-        fetch('http://localhost:8000/api/chart_data')
+        fetch(API_BASE + '/api/chart_data')
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`HTTP ошибка: ${response.status}`);
@@ -1095,7 +1100,7 @@
         updateStatsData();
         
         // Последние попытки
-        fetch('http://localhost:8000/api/attempts?limit=20')
+        fetch(API_BASE + '/api/attempts?limit=20')
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -1107,7 +1112,7 @@
             });
         
         // Загружаем заблокированные IP
-        fetch('http://localhost:8000/api/blocked-ips')
+        fetch(API_BASE + '/api/blocked-ips')
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
