@@ -1,4 +1,5 @@
 import psycopg2
+import psycopg2.extras
 from psycopg2 import sql
 import json
 import os
@@ -100,22 +101,58 @@ class LoginDatabase:
             print(f"❌ Ошибка добавления попытки входа: {e}")
             return None
     
+    def _connect(self):
+        """Создать подключение к PostgreSQL."""
+        return psycopg2.connect(self.database_url)
+
+    def _jsonify_metadata(self, row_dict: dict) -> dict:
+        """Привести metadata к обычному dict (psycopg2 может вернуть строку/объект)."""
+        if not row_dict:
+            return row_dict
+        md = row_dict.get("metadata")
+        if isinstance(md, str):
+            try:
+                row_dict["metadata"] = json.loads(md)
+            except Exception:
+                pass
+        return row_dict
+
+    def get_attempt_by_id(self, attempt_id: int) -> dict | None:
+        """Получить попытку входа по ID."""
+        try:
+            conn = self._connect()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute('''
+                SELECT id, username, ip_address, country, client_type, success, reason,
+                       attempt_time, user_agent, metadata
+                FROM login_attempts
+                WHERE id = %s
+            ''', (attempt_id,))
+
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if not row:
+                return None
+            return self._jsonify_metadata(dict(row))
+        except psycopg2.Error as e:
+            print(f"❌ Ошибка получения попытки по id={attempt_id}: {e}")
+            return None
+
     def get_recent_attempts(self, limit=100):
         """Получить последние попытки входа"""
         try:
-            conn = psycopg2.connect(self.database_url)
-            cursor = conn.cursor()
+            conn = self._connect()
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cursor.execute('''
-                SELECT id, username, ip_address, country, client_type, success, reason, 
+                SELECT id, username, ip_address, country, client_type, success, reason,
                        attempt_time, user_agent, metadata
-                FROM login_attempts 
-                ORDER BY attempt_time DESC 
+                FROM login_attempts
+                ORDER BY attempt_time DESC
                 LIMIT %s
             ''', (limit,))
-            
-            columns = ['id', 'username', 'ip_address', 'country', 'client_type', 'success', 
-                      'reason', 'attempt_time', 'user_agent', 'metadata']
-            results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+            results = [self._jsonify_metadata(dict(row)) for row in cursor.fetchall()]
             cursor.close()
             conn.close()
             return results
