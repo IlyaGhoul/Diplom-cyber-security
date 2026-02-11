@@ -1,6 +1,15 @@
 """
 Сервер для веб-сайта мониторинга
 """
+import sys
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 import os
 from pathlib import Path
 from fastapi import FastAPI

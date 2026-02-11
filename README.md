@@ -32,6 +32,10 @@ poetry run uvicorn website_server:app --host 0.0.0.0 --port 8080
 
 #  3. Запускаем Python приложение (авторизация)
 poetry run python desktop_app.py
+
+## 🐳 Docker Compose (Linux / Windows)
+
+См. `DEPLOYMENT_DOCKER.md` — запуск **API + PostgreSQL** одной командой (подходит для удалённого Linux сервера и для Windows через Docker Desktop).
 ## 📊 База данных
 
 ### Миграция на PostgreSQL (Production)

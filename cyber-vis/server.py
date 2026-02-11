@@ -1,6 +1,15 @@
 """
 FastAPI сервер с WebSocket для системы мониторинга
 """
+import sys
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request  # Добавили Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel

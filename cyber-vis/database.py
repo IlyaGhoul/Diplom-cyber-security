@@ -3,7 +3,16 @@ import psycopg2.extras
 from psycopg2 import sql
 import json
 import os
+import time
+import sys
 from datetime import datetime, timedelta
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        if _stream and hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="replace")
+    except Exception:
+        pass
 
 class LoginDatabase:
     """База данных для хранения попыток входа на PostgreSQL"""
@@ -14,10 +23,11 @@ class LoginDatabase:
         self.database_url = database_url
         self.init_database()
         
-    def init_database(self):
+    def _init_database_once(self):
         """Инициализация таблиц на PostgreSQL"""
+        connect_timeout = int(os.environ.get("DB_CONNECT_TIMEOUT", "3"))
         try:
-            conn = psycopg2.connect(self.database_url)
+            conn = psycopg2.connect(self.database_url, connect_timeout=connect_timeout)
             cursor = conn.cursor()
             
             # Таблица попыток входа
@@ -66,9 +76,28 @@ class LoginDatabase:
             cursor.close()
             conn.close()
             print("✅ База данных PostgreSQL инициализирована")
+        except psycopg2.OperationalError:
+            raise
         except psycopg2.Error as e:
             print(f"❌ Ошибка инициализации БД: {e}")
             raise
+
+    def init_database(self):
+        """Инициализация таблиц на PostgreSQL (с ретраями)"""
+        max_attempts = int(os.environ.get("DB_INIT_MAX_ATTEMPTS", "30"))
+        delay_seconds = float(os.environ.get("DB_INIT_DELAY_SECONDS", "1"))
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self._init_database_once()
+                return
+            except psycopg2.OperationalError as e:
+                if attempt >= max_attempts:
+                    print("❌ Не удалось подключиться к PostgreSQL (исчерпано количество попыток).")
+                    raise
+
+                print(f"⏳ PostgreSQL недоступен ({attempt}/{max_attempts}): {e}")
+                time.sleep(delay_seconds)
     
     def add_attempt(self, username, ip_address, client_type, success, reason="", user_agent="", metadata=None, country=None):
         """Добавить попытку входа"""

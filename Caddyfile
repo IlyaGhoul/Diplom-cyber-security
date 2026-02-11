@@ -1,0 +1,12 @@
+{
+	# Email можно указать для Let's Encrypt (не обязательно)
+	# email you@example.com
+}
+
+# Домен берётся из переменной окружения CYBER_VIS_DOMAIN в .env
+# Пример: CYBER_VIS_DOMAIN=api.example.com
+{$CYBER_VIS_DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000
+}
+
