@@ -1,15 +1,6 @@
 """
 FastAPI сервер с WebSocket для системы мониторинга
 """
-import sys
-
-for _stream in (sys.stdout, sys.stderr):
-    try:
-        if _stream and hasattr(_stream, "reconfigure"):
-            _stream.reconfigure(errors="replace")
-    except Exception:
-        pass
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request  # Добавили Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -19,6 +10,7 @@ import json
 from datetime import datetime
 import uvicorn
 import asyncio
+import sqlite3
 import requests
 
 from database import db
@@ -245,8 +237,17 @@ async def login(request: LoginRequest, http_request: Request):
                 message="⏱️ IP заблокирован на 24 часа из-за многочисленных ошибок."
             )
     
-    # Получаем полные данные о попытке (PostgreSQL)
-    attempt_data = db.get_attempt_by_id(attempt_id) or {}
+    # Получаем полные данные о попытке
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM login_attempts WHERE id = ?', (attempt_id,))
+        row = cursor.fetchone()
+        
+        attempt_data = {}
+        if row:
+            columns = [desc[0] for desc in cursor.description]
+            attempt_data = dict(zip(columns, row))
+            attempt_data['success'] = bool(attempt_data['success'])
     
     # Отправляем событие мониторам
     await manager.broadcast({
@@ -296,20 +297,44 @@ async def get_blocked_ips():
 @app.get("/api/chart_data")
 async def get_chart_data():
     """Получить данные для графика - только успешные и неудачные попытки"""
-    stats = db.get_stats()
-    chart_data = {
-        "total": {
-            "successful": stats.get("successful", 0),
-            "failed": stats.get("failed", 0),
-            "total": stats.get("total_attempts", 0),
-        }
-    }
-
-    return {
-        "success": True,
-        "data": chart_data,
-        "timestamp": datetime.now().isoformat()
-    }
+    # ИСПРАВЛЕНО: используем новое соединение вместо db.conn
+    with sqlite3.connect(db.db_path) as conn:
+        cursor = conn.cursor()
+        
+        try:
+            # Получаем общее количество успешных и неудачных попыток
+            cursor.execute('''
+                SELECT 
+                    COUNT(CASE WHEN success = 1 THEN 1 END) as successful,
+                    COUNT(CASE WHEN success = 0 THEN 1 END) as failed
+                FROM login_attempts
+            ''')
+            
+            row = cursor.fetchone()
+            successful = row[0] or 0
+            failed = row[1] or 0
+            
+            chart_data = {
+                "total": {
+                    "successful": successful,
+                    "failed": failed,
+                    "total": successful + failed
+                }
+            }
+            
+            return {
+                "success": True,
+                "data": chart_data,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения данных графика: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
 
 @app.websocket("/ws/monitor")
 async def websocket_monitor(websocket: WebSocket):
