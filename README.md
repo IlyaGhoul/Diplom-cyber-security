@@ -1,67 +1,89 @@
-# 🚀 CyberVis - Визуализация кибератак в реальном времени
+# CyberVis
 
-**Дипломный проект** - система мониторинга и визуализации кибератак на основе анализа журналов событий.
+Diploma project for monitoring and visualizing login attempts in real time.
 
-# Тайминг событий в реальном времени
-text
-Время   | Событие
---------|--------------------------------------------------------
-00.000  | 👤 Вы вводите "ilya" и "1111" в десктопном приложении
-00.100  | 📤 Приложение отправляет HTTP запрос на сервер
-00.200  | ✅ Сервер получает: {username: "ilya", password: "1111"}
-00.300  | 🔐 Сервер проверяет пароль (сравнивает хеши)
-00.400  | 💾 Сервер сохраняет в БД: "ilya вошел успешно"
-00.500  | 📡 Сервер отправляет через WebSocket: "Новый вход!"
-00.600  | 🌐 Веб-сайт получает уведомление через WebSocket
-00.700  | 📊 Веб-сайт ОБНОВЛЯЕТСЯ: добавляет новую запись
-00.800  | 📨 Десктоп приложение получает ответ: "Успешно!"
-00.900  | 🎉 Вы видите "Добро пожаловать!" в десктопном приложении
-01.000  | 👁️ Вы видите свою попытку на сайте мониторинга
+## How It Works
+1. Desktop client sends login attempts to the API endpoint `/api/auth/login`.
+2. API stores attempts in PostgreSQL.
+3. API pushes new attempts to the WebSocket `/ws/monitor`.
+4. The website updates the dashboard in real time.
 
+## Project Structure
+- Backend (API + DB): this repository.
+- Frontend (website): `D:\Диплом__НА__2026__год\Программирование\Host`.
+- Desktop client: `cyber-vis/desktop_app.py`.
 
-## 🏗️ Архитектура
-<img width="392" height="403" alt="{F40640AE-2F70-4671-8A69-A8420C31BB30}" src="https://github.com/user-attachments/assets/d47733fb-ba16-4d58-bec9-d3fbae7284f6" />
+## Run On VPS With HTTPS/WSS (Recommended)
+Prerequisites:
+- DNS `A` record for `api.<your-domain>` pointing to the VPS IP.
+- Ports `80` and `443` open on the VPS.
+- Docker installed.
 
-## 🚀 Быстрый старт
-
-#  1. Запускаем сервер
-poetry run uvicorn server:app --host 0.0.0.0 --port 8000 --reload
-
-#  2. Запускаем сайт
-poetry run uvicorn website_server:app --host 0.0.0.0 --port 8080
-
-#  3. Запускаем Python приложение (авторизация)
-poetry run python desktop_app.py
-
-## 🐳 Docker Compose (Linux / Windows)
-
-См. `DEPLOYMENT_DOCKER.md` — запуск **API + PostgreSQL** одной командой (подходит для удалённого Linux сервера и для Windows через Docker Desktop).
-## 📊 База данных
-
-### Миграция на PostgreSQL (Production)
-
-Проект использует **PostgreSQL** для сохранения данных между перезагрузками на Render.
-
-**Для локальной разработки:**
-
+Steps:
 ```bash
-# Задайте переменную окружения (Linux/macOS):
-export DATABASE_URL="postgresql://user:password@localhost:5432/login_monitor"
-
-# или на Windows (PowerShell):
-$env:DATABASE_URL = "postgresql://user:password@localhost:5432/login_monitor"
-
-# Установите зависимости
-pip install -r requirements.txt
-
-# Запустите сервер
-python -m uvicorn server:app --reload
+cd /root/Diplom-cyber-security
+cp .env.example .env
+```
+Edit `.env` and set:
+```
+POSTGRES_PASSWORD=strong_password
+CYBER_VIS_DOMAIN=api.cybattack.ru
+```
+Start services:
+```bash
+docker compose -f compose.yaml -f compose.caddy.yaml up -d --build
+```
+Check:
+```
+https://api.cybattack.ru/docs
 ```
 
-**Для Render (Production):**
+## Local Test (No HTTPS)
+```powershell
+docker compose up -d --build
+```
+API docs:
+```
+http://localhost:8000/docs
+```
 
-1. Создайте PostgreSQL базу в [render.com](https://render.com)
-2. Скопируйте `DATABASE_URL` из настроек Render
-3. В настройках сервиса добавьте переменную окружения: `DATABASE_URL`
+## Configure The Frontend
+The website is stored in:
+```
+D:\Диплом__НА__2026__год\Программирование\Host
+```
+Update API and WebSocket URLs:
+```powershell
+python update_api_urls.py https://api.cybattack.ru "D:\Диплом__НА__2026__год\Программирование\Host\cybattack.ru.github.io"
+```
+For local testing:
+```powershell
+python update_api_urls.py http://localhost:8000 "D:\Диплом__НА__2026__год\Программирование\Host\cybattack.ru.github.io"
+cd "D:\Диплом__НА__2026__год\Программирование\Host\cybattack.ru.github.io"
+python -m http.server 5173
+```
+Open:
+```
+http://localhost:5173/index.html
+```
 
-📖 **Подробнее:** см. [POSTGRES_SETUP.md](./POSTGRES_SETUP.md)
+If you use GitHub Pages, commit and push the updated HTML files.
+
+## Run Desktop Client
+On your PC:
+```powershell
+$env:CYBER_VIS_API_BASE="https://api.cybattack.ru"
+python .\cyber-vis\desktop_app.py
+```
+Linux/macOS:
+```bash
+export CYBER_VIS_API_BASE="https://api.cybattack.ru"
+python3 ./cyber-vis/desktop_app.py
+```
+
+## Useful Commands
+```bash
+docker compose -f compose.yaml -f compose.caddy.yaml ps
+docker compose -f compose.yaml -f compose.caddy.yaml logs --tail=100 caddy
+docker compose -f compose.yaml -f compose.caddy.yaml logs --tail=100 api
+```
