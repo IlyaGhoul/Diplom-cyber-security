@@ -1,14 +1,12 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Утилита для обновления URL API и WebSocket в HTML файлах.
 
 Использование:
   python update_api_urls.py <API_URL> [TEMPLATES_DIR]
 
-Пример (шаблоны в папке cyber-vis):
-  python update_api_urls.py https://your-server.com
 
-Пример (любой другой сайт, например GitHub Pages):
+Пример:
   python update_api_urls.py https://your-server.com "D:\\path\\to\\site"
 """
 
@@ -82,16 +80,15 @@ def update_html_urls(api_base: str, ws_url: str, templates_dir: Path) -> bool:
 if __name__ == "__main__":
     _configure_stdout()
 
-    if len(sys.argv) < 2:
-        print("Usage: python update_api_urls.py <API_URL> [TEMPLATES_DIR]")
-        print("Example: python update_api_urls.py https://your-server.com")
+    if len(sys.argv) < 3:
+        print("Usage: python update_api_urls.py <API_URL> <TEMPLATES_DIR>")
+        print("Example: python update_api_urls.py https://your-server.com \"D:\\path\\to\\site\"")
         sys.exit(1)
     
     api_url = sys.argv[1].rstrip('/')
     ws_url = api_url.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/monitor'
 
-    default_templates_dir = Path(__file__).parent / "src" / "cyber_vis" / "app" / "templates"
-    templates_dir = Path(sys.argv[2]) if len(sys.argv) >= 3 else default_templates_dir
+    templates_dir = Path(sys.argv[2])
     
     print("Updating HTML files...")
     print(f"  templates_dir: {templates_dir}")

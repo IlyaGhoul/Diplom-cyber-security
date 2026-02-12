@@ -17,7 +17,6 @@ psycopg2-binary = "^2.9.0"
 [tool.poetry.scripts]
 login-server = "server:app"
 login-desktop = "desktop_app:main"
-login-monitor = "website_server:main"
 
 [build-system]
 requires = ["poetry-core"]
