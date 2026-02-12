@@ -1,103 +1,85 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-Утилита для обновления URL API и WebSocket в HTML файлах.
-
-Использование:
-  python update_api_urls.py <API_URL> [TEMPLATES_DIR]
-
-
-Пример:
-  python update_api_urls.py https://your-server.com "D:\\path\\to\\site"
+Утилита для обновления URL API и WebSocket в HTML файлах
+Использование: python update_api_urls.py https://your-server.com
 """
 
 import sys
 import re
 from pathlib import Path
 
-def _configure_stdout():
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            if stream and hasattr(stream, "reconfigure"):
-                stream.reconfigure(errors="replace")
-        except Exception:
-            pass
-
-def update_html_urls(api_base: str, ws_url: str, templates_dir: Path) -> bool:
+def update_html_urls(api_base: str, ws_url: str):
     """Обновляет URLs в HTML файлах"""
     
+    # Путь к папке с шаблонами (относительно корня проекта)
+    templates_dir = Path(__file__).parent / "cyber-vis" / "src" / "cyber_vis" / "app" / "templates"
+    
     if not templates_dir.exists():
-        print(f"[ERROR] Folder not found: {templates_dir}")
+        print(f"❌ Папка {templates_dir} не найдена!")
         return False
     
-    script_config = f"""    <script>
-        // Конфигурация подключения к API
-        window.CYBER_VIS_API_BASE = '{api_base}';
-        window.CYBER_VIS_WS_URL = '{ws_url}';
-    </script>
+    script_config = f"""        <script>
+            // Конфигурация подключения к API
+            window.CYBER_VIS_API_BASE = '{api_base}';
+            window.CYBER_VIS_WS_URL = '{ws_url}';
+        </script>
 """
-
-    config_script_pattern = re.compile(
-        r"<script[^>]*>.*?window\\.CYBER_VIS_API_BASE\\s*=.*?window\\.CYBER_VIS_WS_URL\\s*=.*?</script>\\s*",
-        flags=re.DOTALL | re.IGNORECASE,
-    )
     
     files_to_update = ["index.html", "monitor.html"]
-    updated_any = False
     
     for filename in files_to_update:
         filepath = templates_dir / filename
         
         if not filepath.exists():
-            print(f"[WARN] File not found: {filepath}")
+            print(f"⚠️  Файл {filepath} не найден")
             continue
         
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
-
-        # Удаляем старый конфиг (если есть)
-        content = config_script_pattern.sub("", content)
-
-        # Вставляем новый конфиг сразу после <head>
-        content, count = re.subn(
-            r"(<head[^>]*>)",
-            r"\\1\n" + script_config,
-            content,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        if count == 0:
-            print(f"[ERROR] <head> tag not found in {filename}")
+        
+        # Ищем тег <head>
+        if "<head>" not in content:
+            print(f"❌ Тег <head> не найден в {filename}")
             continue
+        
+        # Удаляем старый скрипт конфигурации (если есть)
+        content = re.sub(
+            r'        <script>\s*// Конфигурация подключения.*?</script>\s*\n',
+            '',
+            content,
+            flags=re.DOTALL
+        )
+        
+        # Вставляем новый скрипт после <head>
+        content = content.replace(
+            "<head>",
+            f"<head>\n{script_config}",
+            1
+        )
         
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        updated_any = True
-        print(f"[OK] {filename} updated: API_BASE = {api_base}, WS_URL = {ws_url}")
+        print(f"✅ {filename} обновлён: API_BASE = {api_base}, WS_URL = {ws_url}")
     
-    return updated_any
+    return True
 
 if __name__ == "__main__":
-    _configure_stdout()
-
-    if len(sys.argv) < 3:
-        print("Usage: python update_api_urls.py <API_URL> <TEMPLATES_DIR>")
-        print("Example: python update_api_urls.py https://your-server.com \"D:\\path\\to\\site\"")
+    if len(sys.argv) < 2:
+        print("Использование: python update_api_urls.py <API_URL>")
+        print("Пример: python update_api_urls.py https://diplom-cyber-security.onrender.com")
         sys.exit(1)
     
     api_url = sys.argv[1].rstrip('/')
     ws_url = api_url.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws/monitor'
-
-    templates_dir = Path(sys.argv[2])
     
-    print("Updating HTML files...")
-    print(f"  templates_dir: {templates_dir}")
-    print(f"  API Base: {api_url}")
-    print(f"  WebSocket: {ws_url}")
+    print(f"🔄 Обновляю HTML файлы...")
+    print(f"   API Base: {api_url}")
+    print(f"   WebSocket: {ws_url}")
     print()
     
-    if update_html_urls(api_url, ws_url, templates_dir=templates_dir):
-        print("\nDone. API and WebSocket URL updated in HTML files.")
+    if update_html_urls(api_url, ws_url):
+        print("\n✅ Готово! API и WebSocket URL обновлены в HTML файлах.")
     else:
-        print("\nError: failed to update HTML files.")
+        print("\n❌ Ошибка при обновлении файлов.")
         sys.exit(1)

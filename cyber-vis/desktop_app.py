@@ -1,3 +1,4 @@
+import os
 import sys
 import requests
 import threading
@@ -99,7 +100,9 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             }
             
             logger.debug(f"JSON данные: {json_data}")
-            logger.debug(f"URL: http://localhost:8000/api/auth/login")
+            api_base = os.environ.get("CYBER_VIS_API_BASE", "http://localhost:8000").rstrip("/")
+            login_url = f"{api_base}/api/auth/login"
+            logger.debug(f"URL: {login_url}")
             
             # Отправляем с заголовками
             headers = {
@@ -108,7 +111,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             }
             
             response = requests.post(
-                "http://localhost:8000/api/auth/login",
+                login_url,
                 json=json_data,
                 headers=headers,
                 timeout=3
