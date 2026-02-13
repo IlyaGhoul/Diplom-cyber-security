@@ -32,3 +32,4 @@ ENV/
 database.db
 logs/
 *.log
+*.db
