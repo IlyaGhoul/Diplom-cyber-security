@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 from datetime import datetime, timedelta
@@ -5,8 +6,8 @@ from datetime import datetime, timedelta
 class LoginDatabase:
     """База данных для хранения попыток входа"""
     
-    def __init__(self, db_path="login_attempts.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or os.environ.get("CYBER_VIS_DB_PATH") or "login_attempts.db"
         self.init_database()
         
     def init_database(self):

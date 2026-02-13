@@ -4,7 +4,7 @@ Diploma project for monitoring and visualizing login attempts in real time.
 
 ## How It Works
 1. Desktop client sends login attempts to the API endpoint `/api/auth/login`.
-2. API stores attempts in PostgreSQL.
+2. API stores attempts in SQLite (file database).
 3. API pushes new attempts to the WebSocket `/ws/monitor`.
 4. The website updates the dashboard in real time.
 
@@ -26,8 +26,11 @@ cp .env.example .env
 ```
 Edit `.env` and set:
 ```
-POSTGRES_PASSWORD=strong_password
 CYBER_VIS_DOMAIN=api.cybattack.ru
+```
+Optional (change DB location):
+```
+CYBER_VIS_DB_PATH=/data/login_attempts.db
 ```
 Start services:
 ```bash
@@ -46,6 +49,7 @@ API docs:
 ```
 http://localhost:8000/docs
 ```
+Data is stored in SQLite at `CYBER_VIS_DB_PATH` (default `/data/login_attempts.db` inside the container).
 
 ## Configure The Frontend
 The website is stored in:
