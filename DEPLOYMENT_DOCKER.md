@@ -10,6 +10,7 @@
 2. В корне проекта создайте файл `.env`:
    - скопируйте `.env.example` → `.env`
    - при необходимости задайте `CYBER_VIS_DB_PATH` (по умолчанию `/data/login_attempts.db`)
+   - если нужен другой порт на хосте, задайте `API_PORT` (например `42635`)
 
 ## 2) Запуск
 
@@ -27,7 +28,7 @@ docker compose logs -f api
 ```
 
 API документация:
-- `http://localhost:8000/docs`
+- `http://localhost:8000/docs` (или `http://localhost:<API_PORT>/docs`)
 
 ## 3) Подключение клиентов
 
@@ -44,7 +45,7 @@ API документация:
   ```
 
 Если сервер на удалённой машине, подставьте её IP/домен:
-`http://<server-ip>:8000` (или `https://<domain>` если настроите TLS).
+`http://<server-ip>:<API_PORT>` (или `https://<domain>` если настроите TLS).
 
 ### Web monitor (HTML)
 Обновите URL в HTML (или используйте скрипт):

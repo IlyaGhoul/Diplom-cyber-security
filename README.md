@@ -32,6 +32,10 @@ Optional (change DB location):
 ```
 CYBER_VIS_DB_PATH=/data/login_attempts.db
 ```
+Optional (change host port for API):
+```
+API_PORT=42635
+```
 Start services:
 ```bash
 docker compose -f compose.yaml -f compose.caddy.yaml up -d --build
