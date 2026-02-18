@@ -9,6 +9,8 @@ import hashlib
 import json
 from datetime import datetime
 import os
+import time
+import logging
 import uvicorn
 import asyncio
 import sqlite3
@@ -17,6 +19,39 @@ import requests
 from database import db
 
 app = FastAPI(title="Login Monitor API", version="1.0")
+
+logger = logging.getLogger("cyber_vis")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
+
+def extract_client_ip(headers: dict, fallback: str) -> str:
+    return (
+        headers.get("cf-connecting-ip")
+        or headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or headers.get("x-real-ip")
+        or fallback
+    )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = (time.perf_counter() - start) * 1000
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    client_ip = extract_client_ip(headers, request.client.host if request.client else "unknown")
+    cf_ray = headers.get("cf-ray", "-")
+    cf_country = headers.get("cf-ipcountry", "-")
+    logger.info(
+        "HTTP %s %s %s %.1fms client=%s cf_ray=%s cf_country=%s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        duration_ms,
+        client_ip,
+        cf_ray,
+        cf_country,
+    )
+    return response
 
 @app.on_event("startup")
 async def configure_event_loop():
@@ -116,12 +151,22 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        print(f"✅ WebSocket подключен. Всего подключений: {len(self.active_connections)}")
+        headers = {k.lower(): v for k, v in websocket.headers.items()}
+        client_ip = extract_client_ip(headers, websocket.client.host if websocket.client else "unknown")
+        cf_ray = headers.get("cf-ray", "-")
+        cf_country = headers.get("cf-ipcountry", "-")
+        logger.info(
+            "WS CONNECT client=%s cf_ray=%s cf_country=%s total=%s",
+            client_ip,
+            cf_ray,
+            cf_country,
+            len(self.active_connections),
+        )
         
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            print(f"📴 WebSocket отключен. Осталось: {len(self.active_connections)}")
+            logger.info("WS DISCONNECT total=%s", len(self.active_connections))
             
     async def send_personal_message(self, message: dict, websocket: WebSocket):
         try:
@@ -404,9 +449,9 @@ async def websocket_monitor(websocket: WebSocket):
                     break  # Соединение разорвано
                     
     except WebSocketDisconnect:
-        print("📴 WebSocket отключен клиентом")
+        logger.info("WS DISCONNECT client закрыт соединение")
     except Exception as e:
-        print(f"❌ WebSocket ошибка: {e}")
+        logger.error("WS ERROR: %s", e)
     finally:
         manager.disconnect(websocket)
 
