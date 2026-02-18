@@ -1,7 +1,7 @@
 """
 FastAPI сервер с WebSocket для системы мониторинга
 """
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request  # Добавили Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response  # Добавили Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -74,6 +74,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 # Модель запроса
 class LoginRequest(BaseModel):
