@@ -8,6 +8,7 @@ from typing import Optional, List
 import hashlib
 import json
 from datetime import datetime
+import os
 import uvicorn
 import asyncio
 import sqlite3
@@ -16,6 +17,19 @@ import requests
 from database import db
 
 app = FastAPI(title="Login Monitor API", version="1.0")
+
+@app.on_event("startup")
+async def configure_event_loop():
+    if os.name != "nt":
+        return
+    loop = asyncio.get_running_loop()
+    def exception_handler(loop, context):
+        exception = context.get("exception")
+        winerror = getattr(exception, "winerror", None)
+        if isinstance(exception, OSError) and winerror in {64, 10054, 995}:
+            return
+        loop.default_exception_handler(context)
+    loop.set_exception_handler(exception_handler)
 
 # Разрешаем CORS для всех доменов
 app.add_middleware(
