@@ -336,6 +336,9 @@ __pycache__/
 .env.*
 !.env.example
 
+# Local helper tools and tunnel logs
+.tools/
+
 # Cake - Uncomment if you are using it
 # tools/**
 # !tools/packages.config

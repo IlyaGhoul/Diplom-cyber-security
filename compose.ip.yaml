@@ -1,0 +1,11 @@
+services:
+  caddy:
+    image: caddy:2
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile.ip:/etc/caddy/Caddyfile:ro
+      - ./cybattack-main:/srv:ro
+    depends_on:
+      - api
+    restart: unless-stopped
