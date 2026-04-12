@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+        <script>
+            // Конфигурация подключения к API
+            window.CYBER_VIS_API_BASE = 'https://api.cybattack.ru';
+            window.CYBER_VIS_WS_URL = 'wss://api.cybattack.ru/ws/monitor';
+        </script>
+
+        <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <title>Мониторинг попыток входа</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #4cc9f0, #4361ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        
+        .stat-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 25px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: transform 0.3s, background 0.3s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-5px);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        
+        .stat-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+        
+        .stat-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 10px 0;
+            color: #4cc9f0;
+        }
+        
+        .stat-label {
+            color: #aaa;
+            font-size: 1em;
+        }
+        
+        .chart-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .chart-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .chart-header h2 {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+            color: #4cc9f0;
+        }
+        
+        .chart-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 400px;
+            position: relative;
+        }
+        
+        .chart-info {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+        
+        .chart-info-item {
+            text-align: center;
+            padding: 20px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            min-width: 200px;
+        }
+        
+        .chart-info-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .chart-info-label {
+            color: #aaa;
+            font-size: 1.1em;
+        }
+        
+        .success-value {
+            color: #4ade80;
+        }
+        
+        .failed-value {
+            color: #f87171;
+        }
+        
+        .total-value {
+            color: #4cc9f0;
+        }
+        
+        .attempts-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        @media (max-width: 1200px) {
+            .attempts-section {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .attempts-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .panel-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .panel-count {
+            background: #4361ee;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+        }
+        
+        .attempts-list {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+        
+        .attempt-item {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-left: 4px solid #4361ee;
+            animation: slideIn 0.3s ease;
+        }
+        
+        .attempt-item.success {
+            border-left-color: #4ade80;
+        }
+        
+        .attempt-item.failed {
+            border-left-color: #f87171;
+        }
+        
+        .attempt-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        
+        .attempt-username {
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        .attempt-time {
+            color: #888;
+            font-size: 0.9em;
+        }
+        
+        .attempt-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+        
+        .attempt-badge {
+            padding: 3px 12px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        
+        .badge-success {
+            background: rgba(76, 222, 128, 0.2);
+            color: #4ade80;
+        }
+        
+        .badge-failed {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+        }
+        
+        .connection-status {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            z-index: 1000;
+        }
+        
+        .connected {
+            background: rgba(76, 201, 240, 0.2);
+            color: #4cc9f0;
+            border: 1px solid #4cc9f0;
+        }
+        
+        .disconnected {
+            background: rgba(248, 113, 113, 0.2);
+            color: #f87171;
+            border: 1px solid #f87171;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+            font-size: 1.1em;
+        }
+        
+        .error-message {
+            background: rgba(255, 0, 0, 0.1);
+            border: 1px solid rgba(255, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #ff6b6b;
+            text-align: center;
+        }
+        
+        .retry-button {
+            background: #4361ee;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            margin-top: 10px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        .retry-button:hover {
+            background: #3651d4;
+        }
+        
+        /* Скроллбар */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #4361ee;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3651d4;
+        }
+        
+        .last-update {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>👁️ Мониторинг попыток входа</h1>
+            <p>Все попытки авторизации в реальном времени</p>
+        </div>
+        
+        <div class="connection-status disconnected" id="wsStatus">
+            🔴 Не подключено
+        </div>
+        
+        <div id="errorContainer"></div>
+        
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-value" id="totalAttempts">0</div>
+                <div class="stat-label">Всего попыток</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-value" id="successfulAttempts">0</div>
+                <div class="stat-label">Успешных входов</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">❌</div>
+                <div class="stat-value" id="failedAttempts">0</div>
+                <div class="stat-label">Неудачных попыток</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-icon">👤</div>
+                <div class="stat-value" id="uniqueUsers">0</div>
+                <div class="stat-label">Уникальных пользователей</div>
+            </div>
+            <!-- Добавляем новую карточку для IP -->
+            <div class="stat-card">
+                <div class="stat-icon">🌐</div>
+                <div class="stat-value" id="uniqueIPs">0</div>
+                <div class="stat-label">Уникальных IP</div>
+            </div>
+            <!-- Можно добавить еще одну карточку -->
+            <div class="stat-card">
+                <div class="stat-icon">🕐</div>
+                <div class="stat-value" id="lastHourAttempts">0</div>
+                <div class="stat-label">
+                    <div>За последний</div>
+                    <div>час</div>
+                </div>
+            </div>
+            <!-- Можно добавить еще одну карточку для 10 минут -->
+            <div class="stat-card">
+                <div class="stat-icon">⚡</div>
+                <div class="stat-value" id="last10MinAttempts">0</div>
+                <div class="stat-label">
+                    <div>За 10</div>
+                    <div>минут</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chart-section">
+            <div class="chart-header">
+                <h2>📊 Все попытки входа</h2>
+                <p>Общая статистика успешных и неудачных попыток</p>
+            </div>
+            
+            <div class="chart-container">
+                <canvas id="totalChart"></canvas>
+            </div>
+            
+            <div class="chart-info">
+                <div class="chart-info-item">
+                    <div class="chart-info-label">✅ Успешные</div>
+                    <div class="chart-info-value success-value" id="chartSuccessful">0</div>
+                </div>
+                <div class="chart-info-item">
+                    <div class="chart-info-label">❌ Неудачные</div>
+                    <div class="chart-info-value failed-value" id="chartFailed">0</div>
+                </div>
+                <div class="chart-info-item">
+                    <div class="chart-info-label">📊 Всего</div>
+                    <div class="chart-info-value total-value" id="chartTotal">0</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="attempts-section">
+            <div class="attempts-panel">
+                <div class="panel-header">
+                    <div class="panel-title">📋 Последние попытки</div>
+                    <div class="panel-count" id="recentAttemptsCount">0</div>
+                </div>
+                <div class="attempts-list" id="recentAttemptsList">
+                    <div class="empty-state">Загрузка данных...</div>
+                </div>
+            </div>
+            
+            <div class="attempts-panel">
+                <div class="panel-header">
+                    <div class="panel-title">⚡ Сейчас в реальном времени</div>
+                    <div class="panel-count" id="liveAttemptsCount">0</div>
+                </div>
+                <div class="attempts-list" id="liveAttemptsList">
+                    <div class="empty-state">Ожидание новых попыток...</div>
+                </div>
+            </div>
+            
+            <div class="attempts-panel">
+                <div class="panel-header">
+                    <div class="panel-title">🚫 Заблокированные IP</div>
+                    <div class="panel-count" id="blockedIpsCount">0</div>
+                </div>
+                <div class="attempts-list" id="blockedIpsList">
+                    <div class="empty-state">Нет заблокированных IP</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="last-update" id="lastUpdate">
+            Последнее обновление: --
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

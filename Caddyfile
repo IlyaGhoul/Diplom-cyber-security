@@ -5,5 +5,30 @@
 
 {$CYBER_VIS_DOMAIN} {
 	encode gzip
-	reverse_proxy api:8000
+	root * /srv
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle /ws/* {
+		reverse_proxy api:8000
+	}
+
+	handle /docs* {
+		reverse_proxy api:8000
+	}
+
+	handle /redoc* {
+		reverse_proxy api:8000
+	}
+
+	handle /openapi.json {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
 }
