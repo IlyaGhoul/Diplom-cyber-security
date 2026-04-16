@@ -9,6 +9,7 @@ import hashlib
 import json
 from datetime import datetime
 import os
+import sys
 import time
 import logging
 import uvicorn
@@ -16,6 +17,13 @@ import asyncio
 import sqlite3
 import requests
 import ipaddress
+
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 from database import db
 

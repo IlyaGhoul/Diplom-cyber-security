@@ -1,7 +1,15 @@
 import os
+import sys
 import sqlite3
 import json
 from datetime import datetime, timedelta
+
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 class LoginDatabase:
     """База данных для хранения попыток входа"""
