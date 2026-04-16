@@ -4,8 +4,39 @@ import requests
 import threading
 import logging
 import socket
+from pathlib import Path
 from PyQt6 import QtWidgets, QtCore, QtGui
 from loginui import Ui_MainWindow
+
+DEFAULT_API_BASE = "https://api.cybattack.ru"
+
+
+def load_env_file(path: Path):
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        os.environ.setdefault(key, value)
+
+
+def configure_environment():
+    script_dir = Path(__file__).resolve().parent
+    load_env_file(script_dir / ".env")
+    load_env_file(script_dir.parent / ".env")
+
+
+def get_api_base() -> str:
+    return os.environ.get("CYBER_VIS_API_BASE", DEFAULT_API_BASE).rstrip("/")
+
+
+configure_environment()
 
 # Настройка логирования
 logging.basicConfig(
@@ -61,6 +92,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
     
     def send_data_thread(self):
         """Отправка данных в отдельном потоке"""
+        login_url = None
         try:
             username = self.lineEdit.text()
             password = self.lineEdit_2.text()
@@ -100,7 +132,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
             }
             
             logger.debug(f"JSON данные: {json_data}")
-            api_base = os.environ.get("CYBER_VIS_API_BASE", "http://localhost:8000").rstrip("/")
+            api_base = get_api_base()
             login_url = f"{api_base}/api/auth/login"
             logger.debug(f"URL: {login_url}")
             
@@ -157,7 +189,7 @@ class SimpleAuthSender(QtWidgets.QMainWindow, Ui_MainWindow):
                 self,
                 "update_ui_error",
                 QtCore.Qt.ConnectionType.QueuedConnection,
-                QtCore.Q_ARG(str, f"Не удалось подключиться к серверу")
+                QtCore.Q_ARG(str, f"Не удалось подключиться: {login_url or get_api_base()}")
             )
             
         except requests.exceptions.Timeout as e:
