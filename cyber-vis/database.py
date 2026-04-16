@@ -20,6 +20,11 @@ class LoginDatabase:
                     username TEXT NOT NULL,
                     ip_address TEXT,
                     country TEXT,
+                    city TEXT,
+                    latitude REAL,
+                    longitude REAL,
+                    attack_type TEXT,
+                    threat_level TEXT,
                     client_type TEXT,
                     success BOOLEAN NOT NULL,
                     reason TEXT,
@@ -30,13 +35,20 @@ class LoginDatabase:
             ''')
             conn.commit()
             
-            # Добавляем поле country к существующей таблице (если его еще нет)
-            try:
-                cursor.execute('ALTER TABLE login_attempts ADD COLUMN country TEXT')
-                conn.commit()
-            except sqlite3.OperationalError:
-                # Поле уже существует
-                pass
+            # Add missing columns for older local SQLite databases.
+            for column_definition in (
+                "country TEXT",
+                "city TEXT",
+                "latitude REAL",
+                "longitude REAL",
+                "attack_type TEXT",
+                "threat_level TEXT",
+            ):
+                try:
+                    cursor.execute(f"ALTER TABLE login_attempts ADD COLUMN {column_definition}")
+                except sqlite3.OperationalError:
+                    pass
+            conn.commit()
             
             # Таблица заблокированных IP адресов
             cursor.execute('''
@@ -51,7 +63,22 @@ class LoginDatabase:
             ''')
             conn.commit()
     
-    def add_attempt(self, username, ip_address, client_type, success, reason="", user_agent="", metadata=None, country=None):
+    def add_attempt(
+        self,
+        username,
+        ip_address,
+        client_type,
+        success,
+        reason="",
+        user_agent="",
+        metadata=None,
+        country=None,
+        city=None,
+        latitude=None,
+        longitude=None,
+        attack_type="login_attempt",
+        threat_level="low",
+    ):
         """Добавить попытку входа"""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -59,12 +86,18 @@ class LoginDatabase:
             current_time = datetime.now().isoformat()
             cursor.execute('''
                 INSERT INTO login_attempts 
-                (username, ip_address, country, client_type, success, reason, user_agent, metadata, attempt_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (username, ip_address, country, city, latitude, longitude, attack_type, threat_level,
+                 client_type, success, reason, user_agent, metadata, attempt_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 username,
                 ip_address,
                 country,
+                city,
+                latitude,
+                longitude,
+                attack_type,
+                threat_level,
                 client_type,
                 int(success),  # Явно конвертируем bool в int для SQLite
                 reason,
@@ -83,6 +116,22 @@ class LoginDatabase:
             cursor.execute('''
                 SELECT * FROM login_attempts 
                 ORDER BY attempt_time DESC 
+                LIMIT ?
+            ''', (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_geo_attempts(self, limit=200):
+        """Return recent attempts that have coordinates for the attack map."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT
+                    id, username, ip_address, country, city, latitude, longitude,
+                    client_type, success, reason, attack_type, threat_level, attempt_time
+                FROM login_attempts
+                WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+                ORDER BY attempt_time DESC
                 LIMIT ?
             ''', (limit,))
             return [dict(row) for row in cursor.fetchall()]

@@ -15,6 +15,7 @@ import uvicorn
 import asyncio
 import sqlite3
 import requests
+import ipaddress
 
 from database import db
 
@@ -133,6 +134,57 @@ def get_country_by_ip(ip_address: str) -> str:
     
     return "Неизвестно"
 
+def _to_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def is_local_ip(ip_address: str) -> bool:
+    try:
+        parsed_ip = ipaddress.ip_address(ip_address)
+        return parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local
+    except ValueError:
+        return not ip_address or ip_address.lower() == "localhost"
+
+def get_geo_by_ip(ip_address: str) -> dict:
+    """Get country/city/coordinates for the attack map."""
+    fallback = {
+        "country": "Локальное" if is_local_ip(ip_address or "") else "Неизвестно",
+        "city": None,
+        "latitude": None,
+        "longitude": None,
+    }
+
+    if not ip_address or is_local_ip(ip_address):
+        return fallback
+
+    try:
+        response = requests.get(f"https://ipwhois.app/json/{ip_address}", timeout=2)
+        if response.ok:
+            data = response.json()
+            if data.get("success") is False:
+                return fallback
+            return {
+                "country": data.get("country") or fallback["country"],
+                "city": data.get("city"),
+                "latitude": _to_float(data.get("latitude")),
+                "longitude": _to_float(data.get("longitude")),
+            }
+    except Exception as e:
+        print(f"⚠️ Ошибка определения геолокации для IP {ip_address}: {e}")
+
+    return fallback
+
+def classify_attempt(success: bool, failed_attempts_before: int) -> tuple[str, str]:
+    if success:
+        return "successful_login", "low"
+    if failed_attempts_before >= 2:
+        return "brute_force", "high"
+    return "failed_login", "medium"
+
 # Хеш паролей
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -239,6 +291,10 @@ async def login(request: LoginRequest, http_request: Request):
             print(f"   ❌ Пользователь не найден")
         message = "Неверный логин или пароль"
     
+    failed_attempts_before = 0 if is_valid else db.get_failed_attempts_count(client_ip, minutes=15)
+    attack_type, threat_level = classify_attempt(is_valid, failed_attempts_before)
+    geo = await asyncio.to_thread(get_geo_by_ip, client_ip)
+
     # Сохраняем попытку в БД ПЕРЕД проверкой блокировки
     attempt_id = db.add_attempt(
         username=request.username,
@@ -247,14 +303,22 @@ async def login(request: LoginRequest, http_request: Request):
         success=is_valid,
         reason=reason,
         user_agent=request.user_agent,
-        country=get_country_by_ip(client_ip),  # Определяем страну
+        country=geo["country"],
+        city=geo["city"],
+        latitude=geo["latitude"],
+        longitude=geo["longitude"],
+        attack_type=attack_type,
+        threat_level=threat_level,
         metadata={
             "timestamp": datetime.now().isoformat(),
             "client_info": {
                 "type": request.client_type,
                 "user_agent": request.user_agent,
                 "ip_address": client_ip
-            }
+            },
+            "geo": geo,
+            "attack_type": attack_type,
+            "threat_level": threat_level
         }
     )
     
@@ -338,6 +402,18 @@ async def get_attempts(limit: int = 100):
     """Получить историю попыток"""
     attempts = db.get_recent_attempts(limit)
     
+    return {
+        "success": True,
+        "data": attempts,
+        "count": len(attempts),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@app.get("/api/attack-map")
+async def get_attack_map(limit: int = 200):
+    """Получить попытки с координатами для карты атак"""
+    attempts = db.get_geo_attempts(limit)
+
     return {
         "success": True,
         "data": attempts,
@@ -469,6 +545,7 @@ async def root():
             "login": "POST /api/auth/login",
             "stats": "GET /api/stats",
             "attempts": "GET /api/attempts",
+            "attack_map": "GET /api/attack-map",
             "chart_data": "GET /api/chart_data",
             "websocket": "WS /ws/monitor"
         },
